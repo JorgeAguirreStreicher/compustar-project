@@ -1,0 +1,21 @@
+# Logs y temporales
+*.log
+*.tmp
+*.cache
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Virtualenv / entornos locales
+venv/
+.env
+__pycache__/
+
+# Dependencias innecesarias
+node_modules/
+vendor/
+
+# Archivos grandes de SQL (si quieres excluir algunos)
+*.sql.zip
+*.bak
