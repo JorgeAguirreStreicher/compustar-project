@@ -22,7 +22,12 @@ jobs:
         run: |
           mkdir -p ~/.config/rclone
           echo "${{ secrets.RCLONE_CONFIG }}" > ~/.config/rclone/rclone.conf
-
+      
+      - name: Write service account JSON from secret
+        run: |
+          mkdir -p ~/.config/rclone
+          echo '${{ secrets.GDRIVE_SA_JSON }}' > ~/.config/rclone/sa.json
+      
       - name: Create export
         run: |
           mkdir -p .export
