@@ -1,0 +1,80 @@
+name: DB Backup to Google Drive
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # diario a las 07:00 UTC (ajústalo si quieres)
+  workflow_dispatch:       # permite ejecutarlo manualmente
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup SSH agent (load private key)
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Timestamp
+        id: ts
+        run: echo "stamp=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Dump DB on server (mysqldump + gzip)
+        shell: bash
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          DB_HOST:  ${{ secrets.DB_HOST }}
+          DB_NAME:  ${{ secrets.DB_NAME }}
+          DB_USER:  ${{ secrets.DB_USER }}
+          DB_PASS:  ${{ secrets.DB_PASS }}
+          STAMP:    ${{ steps.ts.outputs.stamp }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "\
+            mkdir -p /root/db-backups && \
+            MYSQL_PWD='$DB_PASS' mysqldump \
+              -h '$DB_HOST' -u '$DB_USER' \
+              --single-transaction --quick --skip-lock-tables \
+              '$DB_NAME' | gzip -c > /root/db-backups/db-${STAMP}.sql.gz \
+          "
+
+      - name: Download dump from server (scp)
+        shell: bash
+        env:
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          STAMP:    ${{ steps.ts.outputs.stamp }}
+        run: |
+          mkdir -p ./db-backups
+          scp -o StrictHostKeyChecking=no -P "$SSH_PORT" \
+            "$SSH_USER@$SSH_HOST:/root/db-backups/db-${STAMP}.sql.gz" \
+            "./db-backups/"
+
+      - name: Install rclone
+        run: curl https://rclone.org/install.sh | sudo bash
+
+      - name: Write rclone.conf from secret
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "${{ secrets.RCLONE_CONFIG }}" > ~/.config/rclone/rclone.conf
+
+      - name: Write service account JSON from secret
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "${{ secrets.GDRIVE_SA_JSON }}" > ~/.config/rclone/sa.json
+
+      - name: Upload dump to Google Drive (folder: github-sync/db-backups)
+        run: |
+          rclone copy ./db-backups "gdrive:github-sync/db-backups" --progress
+
+      # Opcional: borrar respaldos más viejos de 30 días en Google Drive
+      - name: Prune old backups in Drive (keep 30d)
+        run: |
+          rclone delete "gdrive:github-sync/db-backups" --min-age 30d || true
