@@ -4,7 +4,8 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
+  schedule:
+    - cron: "0 7 * * *"   # corre todos los días a las 07:00 UTC
 jobs:
   sync:
     runs-on: ubuntu-latest
