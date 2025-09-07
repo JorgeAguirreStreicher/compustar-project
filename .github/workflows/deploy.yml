@@ -18,16 +18,17 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Add server to known_hosts
-        run: |
-          mkdir -p $HOME/.ssh 
-          ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+      # No usamos known_hosts para evitar errores con $HOME vacío.
+      - name: Skip known_hosts (info)
+        run: echo "Using SSH with -o StrictHostKeyChecking=no"
 
       - name: Ensure target directory exists
         run: |
           DEST="${{ secrets.DEPLOY_PATH }}"
           if [ -z "$DEST" ]; then DEST="/root/compustar-deploy"; fi
-          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p \"$DEST\" && echo DEST OK: $DEST"
+          ssh -o StrictHostKeyChecking=no -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "mkdir -p \"$DEST\" && echo DEST OK: $DEST"
 
       - name: Rsync files to server
         run: |
@@ -40,18 +41,18 @@ jobs:
             --exclude "node_modules/" \
             --exclude ".venv/" \
             --exclude "__pycache__/" \
-            -e "ssh -p ${{ secrets.SSH_PORT }}" \
+            -e "ssh -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }}" \
             ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DEST/"
 
-      # (Opcional) comandos de post-deploy — descomentarlos si aplican a tu proyecto
+      # (Opcional) comandos de post-deploy — descoméntalos si aplican a tu proyecto
       - name: Post-deploy commands (optional)
         run: |
           DEST="${{ secrets.DEPLOY_PATH }}"
           if [ -z "$DEST" ]; then DEST="/root/compustar-deploy"; fi
-          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" <<'EOF'
+          ssh -o StrictHostKeyChecking=no -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" <<'EOF'
           set -e
           # cd "$DEST"
-          # ejemplos (descomenta los que apliquen):
           # composer install --no-dev --optimize-autoloader
           # php artisan migrate --force
           # npm ci && npm run build
