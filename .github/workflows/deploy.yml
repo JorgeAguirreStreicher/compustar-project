@@ -1,0 +1,59 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [ main ]      # despliega en cada push a main
+  workflow_dispatch:         # permite ejecutarlo manualmente
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent (load private key)
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Ensure target directory exists
+        run: |
+          DEST="${{ secrets.DEPLOY_PATH }}"
+          if [ -z "$DEST" ]; then DEST="/root/compustar-deploy"; fi
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p \"$DEST\" && echo DEST OK: $DEST"
+
+      - name: Rsync files to server
+        run: |
+          DEST="${{ secrets.DEPLOY_PATH }}"
+          if [ -z "$DEST" ]; then DEST="/root/compustar-deploy"; fi
+          rsync -avz --delete \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            --exclude ".export/" \
+            --exclude "node_modules/" \
+            --exclude ".venv/" \
+            --exclude "__pycache__/" \
+            -e "ssh -p ${{ secrets.SSH_PORT }}" \
+            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DEST/"
+
+      # (Opcional) comandos de post-deploy — descomentarlos si aplican a tu proyecto
+      - name: Post-deploy commands (optional)
+        run: |
+          DEST="${{ secrets.DEPLOY_PATH }}"
+          if [ -z "$DEST" ]; then DEST="/root/compustar-deploy"; fi
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" <<'EOF'
+          set -e
+          # cd "$DEST"
+          # ejemplos (descomenta los que apliquen):
+          # composer install --no-dev --optimize-autoloader
+          # php artisan migrate --force
+          # npm ci && npm run build
+          # systemctl reload nginx || true
+          EOF
