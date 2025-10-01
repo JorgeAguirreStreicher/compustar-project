@@ -2,8 +2,8 @@ name: Deploy to Server
 
 on:
   push:
-    branches: [ main ]      # despliega en cada push a main
-  workflow_dispatch:         # permite ejecutarlo manualmente
+    branches: [ "main" ]   # despliega en cada push a main
+  workflow_dispatch:        # permite ejecutarlo manualmente
 
 jobs:
   deploy:
@@ -13,48 +13,41 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup SSH agent (load private key)
-        uses: webfactory/ssh-agent@v0.8.0
+      - name: Build release artifact
+        run: |
+          mkdir -p release
+          rsync -a compu-import-lego/ release/compu-import-lego/
+          cp -a compu-run-02-06_v3.6.sh release/
+          tar -C release -czf release.tar.gz .
+
+      # Carga la clave privada (Deploy Key)
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
 
-      # No usamos known_hosts para evitar errores con $HOME vacío.
-      - name: Skip known_hosts (info)
-        run: echo "Using SSH with -o StrictHostKeyChecking=no"
-
-      - name: Ensure target directory exists
+      # Agrega known_hosts (del servidor compustar.mx)
+      - name: Add server to known_hosts
         run: |
-          DEST="${{ secrets.DEPLOY_PATH }}"
-          if [ -z "$DEST" ]; then DEST="/root/compustar-deploy"; fi
-          ssh -o StrictHostKeyChecking=no -p "${{ secrets.SSH_PORT }}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "mkdir -p \"$DEST\" && echo DEST OK: $DEST"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
-      - name: Rsync files to server
+      # Sube el release al servidor
+      - name: Upload release tarball
         run: |
-          DEST="${{ secrets.DEPLOY_PATH }}"
-          if [ -z "$DEST" ]; then DEST="/root/compustar-deploy"; fi
-          rsync -avz --delete \
-            --exclude ".git/" \
-            --exclude ".github/" \
-            --exclude ".export/" \
-            --exclude "node_modules/" \
-            --exclude ".venv/" \
-            --exclude "__pycache__/" \
-            -e "ssh -o StrictHostKeyChecking=no -p ${{ secrets.SSH_PORT }}" \
-            ./ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DEST/"
+          scp -o StrictHostKeyChecking=yes release.tar.gz \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/compustar/releases/${{ github.sha }}.tar.gz
 
-      # (Opcional) comandos de post-deploy — descoméntalos si aplican a tu proyecto
-      - name: Post-deploy commands (optional)
+      # Desempaqueta en /home/compustar/releases/<sha>
+      - name: Unpack on server
         run: |
-          DEST="${{ secrets.DEPLOY_PATH }}"
-          if [ -z "$DEST" ]; then DEST="/root/compustar-deploy"; fi
-          ssh -o StrictHostKeyChecking=no -p "${{ secrets.SSH_PORT }}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" <<'EOF'
-          set -e
-          # cd "$DEST"
-          # composer install --no-dev --optimize-autoloader
-          # php artisan migrate --force
-          # npm ci && npm run build
-          # systemctl reload nginx || true
-          EOF
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "mkdir -p /home/compustar/releases/${{ github.sha }} && \
+             tar -C /home/compustar/releases/${{ github.sha }} -xzf /home/compustar/releases/${{ github.sha }}.tar.gz"
+
+      # Ejecuta el deploy con smoke test (usa /home/compustar/deploy/deploy.sh del servidor)
+      - name: Run remote deploy (with smoke test)
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            "/home/compustar/deploy/deploy.sh /home/compustar/releases/${{ github.sha }}"
