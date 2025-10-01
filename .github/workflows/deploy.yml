@@ -2,13 +2,12 @@ name: Deploy to Server
 
 on:
   push:
-    branches: [ "main" ]   # despliega en cada push a main
-  workflow_dispatch:        # permite ejecutarlo manualmente
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -20,34 +19,32 @@ jobs:
           cp -a compu-run-02-06_v3.6.sh release/
           tar -C release -czf release.tar.gz .
 
-      # Carga la clave privada (Deploy Key)
-      - name: Setup SSH agent
+      - name: Setup SSH agent (load private key)
         uses: webfactory/ssh-agent@v0.9.0
         with:
-          ssh-private-key: ${{ secrets.DEPLOY_KEY }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      # Agrega known_hosts (del servidor compustar.mx)
       - name: Add server to known_hosts
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
-      # Sube el release al servidor
-      - name: Upload release tarball
+      - name: Ensure target directory exists
         run: |
-          scp -o StrictHostKeyChecking=yes release.tar.gz \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/compustar/releases/${{ github.sha }}.tar.gz
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "mkdir -p '${{ secrets.DEPLOY_PATH }}'"
 
-      # Desempaqueta en /home/compustar/releases/<sha>
+      - name: Upload release to server
+        run: |
+          scp -P "${{ secrets.SSH_PORT }}" -o StrictHostKeyChecking=yes \
+            release.tar.gz "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:${{ secrets.DEPLOY_PATH }}/release.tar.gz"
+
       - name: Unpack on server
         run: |
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-            "mkdir -p /home/compustar/releases/${{ github.sha }} && \
-             tar -C /home/compustar/releases/${{ github.sha }} -xzf /home/compustar/releases/${{ github.sha }}.tar.gz"
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "tar -C '${{ secrets.DEPLOY_PATH }}' -xzf '${{ secrets.DEPLOY_PATH }}/release.tar.gz'"
 
-      # Ejecuta el deploy con smoke test (usa /home/compustar/deploy/deploy.sh del servidor)
       - name: Run remote deploy (with smoke test)
         run: |
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-            "/home/compustar/deploy/deploy.sh /home/compustar/releases/${{ github.sha }}"
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "/home/compustar/deploy/deploy.sh '${{ secrets.DEPLOY_PATH }}/release'"
