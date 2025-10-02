@@ -171,3 +171,14 @@ Revisados finales; top skipped=zero_stock_all.
 - Cron real de producción llamando `launch.sh` con `DRY_RUN=0`.
 - Reporte automático de TOP skipped tras cada run.
 
+## 2025-10-02 02:50:30 UTC — RUN_ID=1759363194
+
+- WP: /home/compustar/htdocs
+- RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194
+- DRY_RUN: <nil>    LIMIT: <nil>
+- Source: <nil>
+- Final: imported=14488  updated=53  skipped=13996
+
+### Notas
+Nuevo canvas: retomando desde /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194. Launcher=/home/compustar/launch.sh, SOURCE_MASTER=/home/compustar/ProductosHora.csv.
+
