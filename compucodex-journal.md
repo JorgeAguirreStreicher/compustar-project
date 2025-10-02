@@ -97,3 +97,14 @@ Tu nota aquí
 - Cada sesión: registrar “Objetivo → Cambios → Resultados → Decisiones/Next” en el diario.
 - Ante fallos intermitentes: priorizar reproducibilidad usando el launcher + ENV fijo.
 
+## 2025-10-02 02:42:54 UTC — RUN_ID=1759363194
+
+- WP: /home/compustar/htdocs
+- RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194
+- DRY_RUN: <nil>    LIMIT: <nil>
+- Source: <nil>
+- Final: imported=14488  updated=53  skipped=13996
+
+### Notas
+Launcher como entrada única; corrida full OK y journal enganchado.
+
