@@ -223,3 +223,14 @@ Nuevo canvas: retomando desde /home/compustar/htdocs/wp-content/uploads/compu-im
    - WP-CLI con --skip-themes --skip-plugins (parchado)
    - RUNPREFIX evita sudo si ya somos compustar
 
+## 2025-10-02 04:52:00 UTC — RUN_ID=1759379899
+
+- WP: /home/compustar/htdocs
+- RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759379899
+- DRY_RUN: 1    LIMIT: 0
+- Source: <nil>
+- Final: imported=0  updated=0  skipped=0
+
+### Notas
+Ping: alias 'note' y script ccx-journal.sh operativos.
+
