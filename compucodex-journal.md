@@ -234,3 +234,6 @@ Nuevo canvas: retomando desde /home/compustar/htdocs/wp-content/uploads/compu-im
 ### Notas
 Ping: alias 'note' y script ccx-journal.sh operativos.
 
+### SNAPSHOT · STAGES LIST
+(Directorio de stages y permisos)
+```text
