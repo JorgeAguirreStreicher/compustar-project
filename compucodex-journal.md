@@ -355,3 +355,8 @@ drwxrwxr-x 4 compustar compustar  4096 Oct  2 04:33 ..
 -rw-rw-r-- 1 compustar compustar  1905 Sep 24 01:35 11-report.php.bak.2025-09-24_014405
 drwxrwsr-x 2 compustar compustar  4096 Sep 29 19:49 final
 drwxrwxr-x 2 compustar compustar  4096 Sep 30 04:56 logs
+
+```
+
+### SNAPSHOT · STAGES GREP (patrones validate/products/s06/writers)
+```text
