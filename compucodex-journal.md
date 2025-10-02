@@ -119,3 +119,55 @@ Launcher como entrada única; corrida full OK y journal enganchado.
 ### Notas
 Revisados finales; top skipped=zero_stock_all.
 
+## 2025-10-02 02:47:25 UTC — RUN_ID=1759363194
+
+- WP: /home/compustar/htdocs
+- RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194
+- DRY_RUN: <nil>    LIMIT: <nil>
+- Source: <nil>
+- Final: imported=14488  updated=53  skipped=13996
+
+### Notas
+### Canvas 2025-10-02 · Resumen operativo
+
+**Launcher unificado**
+- Usar siempre: `/home/compustar/launch.sh` → symlink a `compu-cron-full_v3.5.sh`.
+- Variables clave al lanzar:
+  - `WP=/home/compustar/htdocs`
+  - `SOURCE_MASTER=/home/compustar/ProductosHora.csv`
+  - `DRY_RUN=0|1  LIMIT=0  REQUIRE_TERM=1`
+  - `SUBSET_FROM=1  SUBSET_ROWS=N` (0 o total para full).
+- WP-CLI forzado con `--skip-themes --skip-plugins` y
+  `WP_CLI_PHP_ARGS="-d display_errors=1 -d error_reporting=22527"` para reducir “Deprecated”.
+
+**Stages & artefactos**
+- 02 normalize → `normalized.jsonl`
+- 03 validate → `validated.jsonl`
+- 04 resolve-map → `resolved.jsonl`
+- 05 terms (WP-CLI)
+- 06 products → `final/{imported,updated,skipped}.csv`
+- Regla de oro: si falla 06, verificar que **exista y sea legible** `resolved.jsonl`.
+
+**Roles/Permisos**
+- Evitamos sudo directo con `RUNPREFIX`:
+  - si `id -un == compustar` ⇒ `env`
+  - si no ⇒ `sudo -u compustar env`
+- Cuando WP-CLI se ejecuta vía sudo sin permisos, bloquea 05: corregido con `RUNPREFIX`.
+
+**Herramientas auxiliares**
+- `run_stages_0206.sh`: depuración 02→06, pero **siempre preferir** `launch.sh` para pruebas.
+- `ccx-journal.sh` + alias `note`: diario en `~/knowledge/compucodex-journal.md` con commit automático.
+- Git del journal configurado como:
+  - `user.name = JorgeAguirreStreicher` (global)
+  - repo `~/knowledge`: `user.name = Compustar Ops (CCX)`, `user.email = aguirre@okdock.mx`.
+
+**Hallazgos clave**
+- Inestabilidad venía de entornos parciales (variables no exportadas, set -u y nombres no definidos, sudo).
+- Estabilizado al centralizar **siempre** el arranque desde `launch.sh` con ENV explícito.
+- Corrida full OK (RUN_ID=1759363194): imported=14488, updated=53, skipped=13996 (principalmente `zero_stock_all`).
+
+**Pendientes sugeridos**
+- (Opcional) Remote para `~/knowledge` y `git push`.
+- Cron real de producción llamando `launch.sh` con `DRY_RUN=0`.
+- Reporte automático de TOP skipped tras cada run.
+
