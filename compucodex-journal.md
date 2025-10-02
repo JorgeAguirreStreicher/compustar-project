@@ -1316,3 +1316,8 @@ final/imported.csv:1:sku,product_id,action,reason
 06-products.php.BAK.2025-10-01-022548:86:  s06_log("FATAL no se pudo abrir $inJsonl");
 06-products.php.BAK.2025-10-01-022548:126:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
 06-products.php.BAK.2025-10-01-022548:163:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+
+```
+
+### SNAPSHOT · LAUNCHER MAP (eval-file / bridges relevantes)
+```bash
