@@ -1495,3 +1495,4 @@ final/imported.csv:1:sku,product_id,action,reason
 ```
 ### FIN SNAPSHOT
 Alias note listo (usa ccx-journal.sh)
+Snapshot STAGES listo. Stage→file mapeado (02..11). Proceder con fix en 03-validate.php y 06-products.php: invalid_lvl1 + missing_title_brand.
