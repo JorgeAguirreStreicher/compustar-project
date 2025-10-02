@@ -1321,3 +1321,173 @@ final/imported.csv:1:sku,product_id,action,reason
 
 ### SNAPSHOT · LAUNCHER MAP (eval-file / bridges relevantes)
 ```bash
+     1  #!/usr/bin/env bash
+     2  set -euo pipefail
+     3  
+     4  # =====================[ Vars por defecto (puedes sobreescribir por env) ]=====================
+     5  WP="${WP:-/home/compustar/htdocs}"
+     6  PLUG="$WP/wp-content/plugins/compu-import-lego"
+     7  RUN_BASE="${RUN_BASE:-$WP/wp-content/uploads/compu-import}"
+     8  WEBUSER="${WEBUSER:-compustar}"          # ← pon compustar en CloudPanel
+     9  if [ "$(id -un)" = "${WEBUSER:-compustar}" ]; then
+    10    RUNPREFIX=env
+    11  else
+    12    RUNPREFIX="sudo -u ${WEBUSER:-compustar} env"
+    13  fi
+    14  : "${bridge:=}"
+    15  : "${file:=}"
+    16  
+    17  # Control general
+    18  STAGES="${STAGES:-02 03 04 05 06 07 08 09 10 11}"  # iniciamos en 02 (como definiste)
+    19  DRY_RUN="${DRY_RUN:-0}"
+    20  LIMIT="${LIMIT:-0}"                    # 0 = sin límite (usamos el subset como control)
+    21  REQUIRE_TERM="${REQUIRE_TERM:-1}"
+    22  FORCE_CSV="${FORCE_CSV:-1}"
+    23  PREVIEW_ONLY="${PREVIEW_ONLY:-0}"
+    24  USE_BRIDGES="${USE_BRIDGES:-1}"       # 1 = usar bridges para 02–04
+    25  
+    26  # Fuente y subset
+    27  SOURCE_MASTER="${SOURCE_MASTER:-/home/compustar/ProductosHora.csv}"
+    28  SUBSET_FROM="${SUBSET_FROM:-1000}"    # primera línea de datos a tomar (tu caso: 1000)
+    29  SUBSET_ROWS="${SUBSET_ROWS:-201}"     # cuántas filas tomar (tu caso: 201 -> 1000..1200)
+    30  WITH_HEADER="${WITH_HEADER:-1}"       # 1 = preserva encabezado de SOURCE_MASTER
+    31  
+    32  # Run folder
+    33  RUN_ID="${RUN_ID:-$(date +%s)}"
+    34  RUN_DIR="$RUN_BASE/run-$RUN_ID"
+    35  LOG_DIR="$RUN_DIR/logs"
+    36  FINAL_DIR="$RUN_DIR/final"
+    37  
+    38  # Paths bridges (si USE_BRIDGES=1)
+    39  BRIDGES_DIR="${BRIDGES_DIR:-/home/compustar/bridges}"
+    40  BRIDGE_02="$BRIDGES_DIR/normalize_bridge_v2.php"
+    41  BRIDGE_03="$BRIDGES_DIR/validate_bridge.php"
+    42  BRIDGE_04="$BRIDGES_DIR/resolve_bridge.php"
+    43  BRIDGE_06="$BRIDGES_DIR/run_stage06_bridge.php"
+    44  
+    45  # =====================[ Setup ]=====================
+    46  mkdir -p "$LOG_DIR" "$FINAL_DIR"
+    47  chown -R "$WEBUSER:$WEBUSER" "$RUN_DIR"
+    48  find "$RUN_DIR" -type d -exec chmod 2775 {} \; >/dev/null 2>&1 || true
+    49  find "$RUN_DIR" -type f -exec chmod 0664 {} \; >/dev/null 2>&1 || true
+    50  
+    51  echo "== Compustar | Cron Full v3.5 (stages: $STAGES) =="
+    52  echo "RUN_ID: $RUN_ID"
+    53  echo "RUN_DIR: $RUN_DIR"
+    54  echo "WP: $WP"
+    55  echo "WEBUSER=$WEBUSER DRY_RUN=$DRY_RUN LIMIT=$LIMIT REQUIRE_TERM=$REQUIRE_TERM"
+    56  date
+    57  
+    58  # =====================[ CSV de trabajo (subset reproducible) ]=====================
+    59  SRC_CLEAN="$RUN_DIR/source_clean.csv"
+    60  if [[ ! -f "$SOURCE_MASTER" ]]; then
+    61    echo "ERROR: SOURCE_MASTER no existe: $SOURCE_MASTER" >&2
+    62    exit 1
+    63  fi
+    64  
+    65  if [[ "$WITH_HEADER" == "1" ]]; then
+    66    head -n 1 "$SOURCE_MASTER" > "$SRC_CLEAN"
+    67    tail -n +"$SUBSET_FROM" "$SOURCE_MASTER" | head -n "$SUBSET_ROWS" >> "$SRC_CLEAN"
+    68  else
+    69    tail -n +"$SUBSET_FROM" "$SOURCE_MASTER" | head -n "$SUBSET_ROWS" > "$SRC_CLEAN"
+    70  fi
+    71  chown "$WEBUSER:$WEBUSER" "$SRC_CLEAN"
+    72  echo "[info] subset => from=$SUBSET_FROM rows=$SUBSET_ROWS header=$WITH_HEADER -> $SRC_CLEAN"
+    73  
+    74  # Helpers
+    75  php_stage () {
+    76    local file="$1" name="$(basename "$file")"
+    77    echo -e "\n---- $name ----"
+    78    RUN_ID="$RUN_ID" RUN_DIR="$RUN_DIR" CSV_SRC="$SRC_CLEAN" DRY_RUN="$DRY_RUN" LIMIT="$LIMIT" \
+    79    /usr/bin/php -d display_errors=1 -d error_reporting=E_ALL -d memory_limit=1024M "$file" \
+    80    2>&1 | tee "$LOG_DIR/${name%.php}.log"
+    81  }
+    82  
+    83  php_bridge () {
+    84    local bridge="$1" name="$(basename "$bridge")"
+    85    echo -e "\n---- $name ----"
+    86    RUN_ID="$RUN_ID" RUN_DIR="$RUN_DIR" CSV_SRC="$SRC_CLEAN" DRY_RUN="$DRY_RUN" LIMIT="$LIMIT" \
+    87    /usr/bin/php -d display_errors=1 -d error_reporting=E_ALL -d memory_limit=1024M "$bridge" \
+    88    2>&1 | tee "$LOG_DIR/${name%.php}.log"
+    89  }
+    90  
+    91  wp_eval () {
+    92    local file="$1" name="$(basename "$file")"
+    93    echo -e "\n---- $name ----"
+    94    $RUNPREFIX RUN_ID="$RUN_ID" RUN_DIR="$RUN_DIR" CSV_SRC="$SRC_CLEAN" \
+    95      DRY_RUN="$DRY_RUN" LIMIT="$LIMIT" REQUIRE_TERM="$REQUIRE_TERM" \
+    96      FORCE_CSV="$FORCE_CSV" PREVIEW_ONLY="$PREVIEW_ONLY" \
+    97      /usr/local/bin/wp --path="$WP" --skip-themes --skip-plugins eval-file "$file" \
+    98      2>&1 | tee "$LOG_DIR/${name%.php}.log"
+    99  }
+   100  
+   101  wp_eval_bridge () {
+   102    local bridge="$1" name="$(basename "$bridge")"
+   103    echo -e "\n---- $name ----"
+   104    $RUNPREFIX RUN_ID="$RUN_ID" RUN_DIR="$RUN_DIR" CSV_SRC="$SRC_CLEAN" \
+   105      DRY_RUN="$DRY_RUN" LIMIT="$LIMIT" REQUIRE_TERM="$REQUIRE_TERM" \
+   106      FORCE_CSV="$FORCE_CSV" PREVIEW_ONLY="$PREVIEW_ONLY" \
+   107      /usr/local/bin/wp --path="$WP" --skip-themes --skip-plugins eval-file "$bridge" \
+   108      2>&1 | tee "$LOG_DIR/${name%.php}.log"
+   109  }
+   110  
+   111  # =====================[ 02→04 ]=====================
+   112  if [[ "$STAGES" == *"02"* ]]; then
+   113    if [[ "$USE_BRIDGES" == "1" ]]; then php_bridge "$BRIDGE_02"; else php_stage "$PLUG/includes/stages/02-normalize.php"; fi
+   114    ls -lh "$RUN_DIR/normalized.jsonl" "$RUN_DIR/header-map.json" 2>/dev/null || true
+   115  fi
+   116  
+   117  if [[ "$STAGES" == *"03"* ]]; then
+   118    if [[ "$USE_BRIDGES" == "1" ]]; then php_bridge "$BRIDGE_03"; else php_stage "$PLUG/includes/stages/03-validate.php"; fi
+   119    ls -lh "$RUN_DIR/validated.jsonl" 2>/dev/null || true
+   120  fi
+   121  
+   122  if [[ "$STAGES" == *"04"* ]]; then
+   123    if [[ "$USE_BRIDGES" == "1" ]]; then php_bridge "$BRIDGE_04"; else php_stage "$PLUG/includes/stages/04-resolve-map.php"; fi
+   124    ls -lh "$RUN_DIR/resolved.jsonl" 2>/dev/null || true
+   125  fi
+   126  
+   127  # =====================[ 05 con WP-CLI ]=====================
+   128  if [[ "$STAGES" == *"05"* ]]; then
+   129    wp_eval "$PLUG/includes/stages/05-terms.php"
+   130    ls -lh "$RUN_DIR/terms_resolved.jsonl" 2>/dev/null || true
+   131  
+   132    # Si se generó terms_resolved.jsonl, úsalo para 06+
+   133    if [[ -f "$RUN_DIR/terms_resolved.jsonl" ]]; then
+   134      cp -af "$RUN_DIR/terms_resolved.jsonl" "$RUN_DIR/resolved.jsonl"
+   135      chown "$WEBUSER:$WEBUSER" "$RUN_DIR/resolved.jsonl"
+   136      echo "[info] terms_resolved.jsonl copiado a resolved.jsonl"
+   137    fi
+   138  fi
+   139  
+   140  # =====================[ 06→11 con WP-CLI ]=====================
+   141  if [[ "$STAGES" == *"06"* ]]; then
+   142    # Forzamos input y escritura real
+   143    export INPUT_JSONL="$RUN_DIR/resolved.jsonl"
+   144    wp_eval "$PLUG/includes/stages/06-products.php"
+   145  fi
+   146  if [[ "$STAGES" == *"07"* ]]; then wp_eval "$PLUG/includes/stages/07-media.php"; fi
+   147  if [[ "$STAGES" == *"08"* ]]; then wp_eval "$PLUG/includes/stages/08-offers.php"; fi
+   148  if [[ "$STAGES" == *"09"* ]]; then wp_eval "$PLUG/includes/stages/09-pricing.php"; fi
+   149  if [[ "$STAGES" == *"10"* ]]; then wp_eval "$PLUG/includes/stages/10-publish.php"; fi
+   150  if [[ "$STAGES" == *"11"* ]]; then wp_eval "$PLUG/includes/stages/11-report.php"; fi
+   151  
+   152  # =====================[ Resumen final y árbol con timestamps ]=====================
+   153  echo -e "\n--- FINAL CSVs ---"
+   154  if ls "$FINAL_DIR"/*.csv >/dev/null 2>&1; then
+   155    wc -l "$FINAL_DIR"/*.csv
+   156    echo -e "\n--- TOP motivos skipped ---"
+   157    if [[ -f "$FINAL_DIR/skipped.csv" ]]; then
+   158      awk -F, 'NR>1{c[$4]++} END{for(k in c) printf "%6d %s\n", c[k], k}' "$FINAL_DIR/skipped.csv" | sort -nr | head
+   159    else
+   160      echo "(no hay skipped.csv)"
+   161    fi
+   162  else
+   163    echo "(no hay CSVs en $FINAL_DIR aún)"
+   164  fi
+   165  
+   166  echo -e "\n== Árbol con fechas =="
+   167  find "$RUN_DIR" -printf '%TY-%Tm-%Td %TH:%TM:%TS\t%k KB\t%p\n' | sort
+   168  
+   169  echo -e "\n== FIN | RUN_ID=$RUN_ID =="
+   170  export WP_CLI_PHP_ARGS="-d display_errors=1 -d error_reporting=22527"
