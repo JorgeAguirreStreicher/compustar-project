@@ -182,3 +182,44 @@ Revisados finales; top skipped=zero_stock_all.
 ### Notas
 Nuevo canvas: retomando desde /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194. Launcher=/home/compustar/launch.sh, SOURCE_MASTER=/home/compustar/ProductosHora.csv.
 
+## 2025-10-02 03:12:59 UTC — RUN_ID=1759374779
+
+- WP: /home/compustar/htdocs
+- RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759374779
+- DRY_RUN: 1    LIMIT: 0
+- Source: <nil>
+- Final: imported=0  updated=0  skipped=0
+
+### Notas
+**DRY_RUN que sí deja CSVs + ENV mínimo para pruebas**
+
+1) DRY_RUN=1 por defecto NO escribe final/*.csv en 05–11. Para ver imported/updated/skipped en pruebas:
+   - FORCE_CSV=1
+   - (opcional) PREVIEW_ONLY=1
+
+2) ENV mínimo recomendado (pruebas rápidas):
+   WP=/home/compustar/htdocs
+   SOURCE_MASTER=/home/compustar/ProductosHora.csv
+   DRY_RUN=1 REQUIRE_TERM=1 LIMIT=0
+   SUBSET_FROM=1 SUBSET_ROWS=2000
+   FORCE_CSV=1 PREVIEW_ONLY=1
+   STAGES="02 03 04 05 06"
+   WP_CLI_PHP_ARGS="-d display_errors=1 -d error_reporting=22527"
+
+   Lanzar: /home/compustar/launch.sh
+
+3) Corrida “real”:
+   DRY_RUN=0 SUBSET_ROWS=0 STAGES="02 03 04 05 06"
+   /home/compustar/launch.sh
+
+4) Ubicar resultados:
+   RUNS="$WP/wp-content/uploads/compu-import"
+   RUN_DIR=$(ls -1dt "$RUNS"/run-* | head -n1)
+   Artefactos: normalized.jsonl, validated.jsonl, resolved.jsonl
+   Finales:   final/{imported.csv,updated.csv,skipped.csv}
+
+5) Notas de launcher v3.5:
+   - Symlink: /home/compustar/launch.sh → /home/compustar/compu-cron-full_v3.5.sh
+   - WP-CLI con --skip-themes --skip-plugins (parchado)
+   - RUNPREFIX evita sudo si ya somos compustar
+
