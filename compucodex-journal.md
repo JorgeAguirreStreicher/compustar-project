@@ -1491,3 +1491,6 @@ final/imported.csv:1:sku,product_id,action,reason
    168  
    169  echo -e "\n== FIN | RUN_ID=$RUN_ID =="
    170  export WP_CLI_PHP_ARGS="-d display_errors=1 -d error_reporting=22527"
+
+```
+### FIN SNAPSHOT
