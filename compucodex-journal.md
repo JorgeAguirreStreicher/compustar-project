@@ -1494,3 +1494,4 @@ final/imported.csv:1:sku,product_id,action,reason
 
 ```
 ### FIN SNAPSHOT
+Alias note listo (usa ccx-journal.sh)
