@@ -360,3 +360,959 @@ drwxrwxr-x 2 compustar compustar  4096 Sep 30 04:56 logs
 
 ### SNAPSHOT · STAGES GREP (patrones validate/products/s06/writers)
 ```text
+06-products.php.BAK.2025-10-01-183237:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-183237:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-183237:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-183237:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-183237:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-183237:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-183237:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-183237:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-183237:196:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-183237:233:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+10-publish.php.bak.2025-09-24_004823:7:if (!function_exists('wc_get_products')) { fwrite(STDERR,"[10] WooCommerce no cargado\n"); return; }
+10-publish.php.bak.2025-09-24_004823:15:$ids = wc_get_products($args);
+10-publish.php.bak.2025-09-24_004823:18:  $p=wc_get_product($pid); if(!$p)continue;
+06-products.php.BAK.2025-09-30-222521:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-09-30-222521:28:function s06_log($msg) {
+06-products.php.BAK.2025-09-30-222521:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-09-30-222521:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-30-222521:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-09-30-222521:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-09-30-222521:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-09-30-222521:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-09-30-222521:143:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+07-media.php.bak.2025-09-24_004823:31:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+07-media.php.bak.2025-09-24_004823:33:if (empty($rows)) { SLOG07("No hay datos en resolved/validated"); return; }
+07-media.php.bak.2025-09-24_004823:35:if (!function_exists('wc_get_product_id_by_sku')) { SLOG07("WooCommerce no cargado; abortando stage 07"); return; }
+07-media.php.bak.2025-09-24_004823:51:  $pid = wc_get_product_id_by_sku($sku);
+07-media.php.bak.2025-09-24_004823:52:  if(!$pid) { fputcsv($er,[$sku,$url,"product_not_found"]); $fail++; continue; }
+09-pricing.php.bak.2025-09-23_202949:15:if (!function_exists('wc_get_product_id_by_sku')) { SLOG09("WooCommerce no cargado; abortando stage 09"); return; }
+09-pricing.php.bak.2025-09-23_202949:45:  $pid=wc_get_product_id_by_sku($sku); if(!$pid){fputcsv($csve,[$sku,"product_not_found"]);$err++;continue;}
+09-pricing.php.bak.2025-09-23_202949:46:  $p=wc_get_product($pid); if(!$p){fputcsv($csve,[$sku,"wc_get_product_failed"]);$err++;continue;}
+08-offers.php.bak.2025-09-24_002454:24:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php.bak.2025-09-24_002454:46:  // intentamos mapear al product_id por SKU de Woo (si existe)
+08-offers.php.bak.2025-09-24_002454:47:  $pid = (function_exists('wc_get_product_id_by_sku')? wc_get_product_id_by_sku($sku) : 0);
+08-offers.php.bak.2025-09-24_002454:49:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php.bak.2025-09-24_002454:51:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php.bak.2025-09-24_002454:60:  // - product_id   := si se pudo resolver
+08-offers.php.bak.2025-09-24_002454:65:  $row = $wpdb->get_row($wpdb->prepare("SELECT id, price_cost, currency, stock, product_id FROM $table WHERE supplier_sku=%s",$sku), ARRAY_A);
+08-offers.php.bak.2025-09-24_002454:71:            || (($pid !== null) && (intval($row['product_id']) !== $pid));
+08-offers.php.bak.2025-09-24_002454:81:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+08-offers.php.bak.2025-09-24_002454:104:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+06-products.php.BAK.2025-10-01-182408:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-182408:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-182408:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-182408:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-182408:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-182408:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-182408:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-182408:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-182408:196:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-182408:233:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-21_225645:3: * Stage 06 — Products (blindado / minimal)
+06-products.php.BAK.2025-09-21_225645:4: * - Lee RUN_DIR/resolved.jsonl (o validated.jsonl si el primero no existe)
+06-products.php.BAK.2025-09-21_225645:5: * - Crea/actualiza productos WooCommerce (conservador: título, excerpt, contenido, SKU y tipo)
+06-products.php.BAK.2025-09-21_225645:11: *  - Nunca imprime JSON de “05-terms”. La única salida final es un JSON de “06-products-minimal”.
+06-products.php.BAK.2025-09-21_225645:65:function s06_log($msg) {
+06-products.php.BAK.2025-09-21_225645:71:s06_log("RUN_ID={$GLOBALS['RUN_ID']} RUN_DIR={$GLOBALS['RUN_DIR']} DRY_RUN={$GLOBALS['DRY']} LIMIT=".($GLOBALS['LIMIT']??'none')." OFFSET={$GLOBALS['OFFSET']} REQUIRE_TERM={$GLOBALS['REQUIRE_TERM']}");
+06-products.php.BAK.2025-09-21_225645:75:$inValidated = $RUN_DIR.'/validated.jsonl';
+06-products.php.BAK.2025-09-21_225645:76:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.BAK.2025-09-21_225645:78:    s06_log("ERROR: no existe resolved.jsonl ni validated.jsonl en $RUN_DIR");
+06-products.php.BAK.2025-09-21_225645:86:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-21_225645:92:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.BAK.2025-09-21_225645:98:function s06_clip($txt, $len=300) {
+06-products.php.BAK.2025-09-21_225645:102:function s06_build_name(array $row): string {
+06-products.php.BAK.2025-09-21_225645:104:    $b = trim((string)s06_first($row,['brand','marca'],''));
+06-products.php.BAK.2025-09-21_225645:105:    $m = trim((string)s06_first($row,['model','modelo'],''));
+06-products.php.BAK.2025-09-21_225645:106:    $t = trim((string)s06_first($row,['title','titulo','Título'],''));
+06-products.php.BAK.2025-09-21_225645:110:function s06_find_pid_by_sku(string $sku): ?int {
+06-products.php.BAK.2025-09-21_225645:117:function s06_upsert_compu_products(string $sku, array $row, int $pid, int $DRY): void {
+06-products.php.BAK.2025-09-21_225645:119:    $table = $wpdb->prefix.'compu_products';
+06-products.php.BAK.2025-09-21_225645:124:    $name  = s06_build_name($row);
+06-products.php.BAK.2025-09-21_225645:125:    $short = s06_clip(s06_first($row,['short_description','short','resumen','excerpt'],$name));
+06-products.php.BAK.2025-09-21_225645:126:    $long  = (string) s06_first($row,['description','Descripción','descripcion'],'');
+06-products.php.BAK.2025-09-21_225645:127:    $images= (string) s06_first($row,['image','Imagen Principal','img','imagen'],'');
+06-products.php.BAK.2025-09-21_225645:148:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.BAK.2025-09-21_225645:149:    $sku = trim((string)s06_first($row,['sku','SKU','Sku','SkuID','clave'],''));
+06-products.php.BAK.2025-09-21_225645:152:    $pidExisting = s06_find_pid_by_sku($sku);
+06-products.php.BAK.2025-09-21_225645:153:    $termId = (int) s06_first($row, ['term_id','termId','woo_term_id','category_id'], 0);
+06-products.php.BAK.2025-09-21_225645:159:    $name  = s06_build_name($row);
+06-products.php.BAK.2025-09-21_225645:160:    $short = s06_clip(s06_first($row,['short_description','short','resumen','excerpt'],$name));
+06-products.php.BAK.2025-09-21_225645:161:    $long  = (string) s06_first($row,['description','Descripción','descripcion'],'');
+06-products.php.BAK.2025-09-21_225645:173:        'post_type'=>'product','post_status'=>'draft',
+06-products.php.BAK.2025-09-21_225645:179:    wp_set_object_terms($pid,'simple','product_type');
+06-products.php.BAK.2025-09-21_225645:188:if (!$fh) { s06_log("ERROR: no pude abrir $inFile"); exit(5); }
+06-products.php.BAK.2025-09-21_225645:205:    $sku = trim((string)s06_first($row,['sku','SKU','Sku','SkuID','clave'],''));
+06-products.php.BAK.2025-09-21_225645:208:    $out = ['sku'=>$sku,'product_id'=>'','action'=>'','reason'=>''];
+06-products.php.BAK.2025-09-21_225645:210:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $out);
+06-products.php.BAK.2025-09-21_225645:213:    s06_upsert_compu_products($sku,$row,(int)$pid,$DRY);
+06-products.php.BAK.2025-09-21_225645:215:    $out['product_id'] = (string)$pid;
+06-products.php.BAK.2025-09-21_225645:229:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-21_225645:232:    'stage'     => '06-products-minimal',
+06-products.php.BAK.2025-10-01-021514:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-021514:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-021514:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-021514:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-021514:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-021514:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-021514:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-021514:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-021514:143:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+09-pricing.php.bak.2025-09-24_004823:15:if (!function_exists('wc_get_product_id_by_sku')) { SLOG09("WooCommerce no cargado; abortando stage 09"); return; }
+09-pricing.php.bak.2025-09-24_004823:45:  $pid=wc_get_product_id_by_sku($sku); if(!$pid){fputcsv($csve,[$sku,"product_not_found"]);$err++;continue;}
+09-pricing.php.bak.2025-09-24_004823:46:  $p=wc_get_product($pid); if(!$p){fputcsv($csve,[$sku,"wc_get_product_failed"]);$err++;continue;}
+07-media.php.bak.2025-09-23_205112:31:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+07-media.php.bak.2025-09-23_205112:33:if (empty($rows)) { SLOG07("No hay datos en resolved/validated"); return; }
+07-media.php.bak.2025-09-23_205112:35:if (!function_exists('wc_get_product_id_by_sku')) { SLOG07("WooCommerce no cargado; abortando stage 07"); return; }
+07-media.php.bak.2025-09-23_205112:51:  $pid = wc_get_product_id_by_sku($sku);
+07-media.php.bak.2025-09-23_205112:52:  if(!$pid) { fputcsv($er,[$sku,$url,"product_not_found"]); $fail++; continue; }
+08-offers.php.bak:18:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+08-offers.php.bak:43:      // Mapeo: si viene "unmapped" o sin lvl3_id, podemos saltar (cuando el archivo es validated.jsonl puede no traer mapeo)
+08-offers.php.bak:48:      if (function_exists('wc_get_product_id_by_sku')) { $post_id = intval(wc_get_product_id_by_sku($sku)); }
+08-offers.php.bak:49:      if (!$post_id && function_exists('compu_import_find_product_id_by_sku')) { $post_id = intval(compu_import_find_product_id_by_sku($sku)); }
+08-offers.php.bak:53:      if (!$post_id) { $skipped_mode++; continue; } // por simplicidad, solo upsert a productos existentes
+06-products.php.patched.1:3: * Stage 06 — Products (minimal scope)
+06-products.php.patched.1:6: *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+06-products.php.patched.1:7: *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+06-products.php.patched.1:8: *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+06-products.php.patched.1:10: *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+06-products.php.patched.1:24: *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+06-products.php.patched.1:28: *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+06-products.php.patched.1:88:function s06_log(string $msg) {
+06-products.php.patched.1:95:s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+06-products.php.patched.1:99:$inValidated = $RUN_DIR . '/validated.jsonl';
+06-products.php.patched.1:100:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.patched.1:102:    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+06-products.php.patched.1:120:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.patched.1:126:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.patched.1:135:function s06_clip(string $text, int $len=300): string {
+06-products.php.patched.1:142:/** Insert or update row in wp_compu_products (minimal fields) */
+06-products.php.patched.1:143:function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+06-products.php.patched.1:145:    $table = $wpdb->prefix . 'compu_products';
+06-products.php.patched.1:146:    $name  = s06_build_name($row);
+06-products.php.patched.1:147:    $short = s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+06-products.php.patched.1:148:    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.patched.1:149:    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+06-products.php.patched.1:153:        'wp_post_id'        => $product_id,
+06-products.php.patched.1:161:    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+06-products.php.patched.1:174:function s06_build_name(array $row): string {
+06-products.php.patched.1:176:    $brand = trim((string) s06_first($row, ['brand','marca'], ''));
+06-products.php.patched.1:177:    $model = trim((string) s06_first($row, ['model','modelo'], ''));
+06-products.php.patched.1:178:    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+06-products.php.patched.1:185:/** Find product by SKU */
+06-products.php.patched.1:186:function s06_find_product_id_by_sku(string $sku): ?int {
+06-products.php.patched.1:192:/** Create or update product shell */
+06-products.php.patched.1:193:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.patched.1:194:    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave']));
+06-products.php.patched.1:198:    $pidExisting = s06_find_product_id_by_sku($sku);
+06-products.php.patched.1:201:    $termId = (int) s06_first($row, ['term_id','termId','woo_term_id','category_id'], 0);
+06-products.php.patched.1:207:    $name = s06_build_name($row);
+06-products.php.patched.1:208:    $short= s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], $name));
+06-products.php.patched.1:209:    $long = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.patched.1:218:        // Minimal product updates
+06-products.php.patched.1:237:        'post_type'   => 'product',
+06-products.php.patched.1:249:    // Set SKU & basic product type
+06-products.php.patched.1:251:    wp_set_object_terms($pid, 'simple', 'product_type');
+06-products.php.patched.1:260:if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+06-products.php.patched.1:273:    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave'], ''));
+06-products.php.patched.1:276:    $out = ['sku'=>$sku, 'product_id'=>'', 'action'=>'', 'reason'=>''];
+06-products.php.patched.1:278:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $out);
+06-products.php.patched.1:285:    // Write to compu_products (minimal fields)
+06-products.php.patched.1:286:    s06_upsert_compu_product($sku, $row, (int)$pid, $DRY);
+06-products.php.patched.1:289:    $out['product_id'] = (string) $pid;
+06-products.php.patched.1:319:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.patched.1:323:    'stage'     => '06-products-minimal',
+04-resolve-map.php.BAK.2025-09-30-210125:9:    $src  = $dir . '/validated.jsonl';
+04-resolve-map.php.BAK.2025-09-30-210125:10:    if (!file_exists($src)) \WP_CLI::error('Falta validated.jsonl; corre validate.');
+06-products.php.BAK.2025-09-30-212123:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-09-30-212123:28:function s06_log($msg) {
+06-products.php.BAK.2025-09-30-212123:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-09-30-212123:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-30-212123:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-09-30-212123:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-09-30-212123:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-09-30-212123:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-09-30-212123:143:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+08-offers.php:37:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php:59:  // intentamos mapear al product_id por SKU de Woo (si existe)
+08-offers.php:60:  $pid = (function_exists('wc_get_product_id_by_sku')? wc_get_product_id_by_sku($sku) : 0);
+08-offers.php:62:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php:63:  if($product_id<=0){ $err++; $act="error"; SLOG08("NOPROD sku=".$sku); fputcsv($out,[$sku,0,$supplier,15,"MAIN",0,0,$currency,$act]); continue; }
+08-offers.php:65:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php:67:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php:76:  // - product_id   := si se pudo resolver
+08-offers.php:81:  $row = $wpdb->get_row($wpdb->prepare("SELECT id, price_cost, currency, stock, product_id FROM $table WHERE supplier_sku=%s",$sku), ARRAY_A);
+08-offers.php:87:            || (($pid !== null) && (intval($row['product_id']) !== $pid));
+08-offers.php:97:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+08-offers.php:120:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+09-pricing.php.bak.20250921_000034:6: * - Selecciona la mejor oferta (precio más bajo con stock) desde wp_compu_offers por producto.
+09-pricing.php.bak.20250921_000034:24:    if ($onlyExisting && !function_exists('wc_get_product_id_by_sku')) {
+09-pricing.php.bak.20250921_000034:25:      \WP_CLI::error('WooCommerce no disponible (wc_get_product_id_by_sku).');
+09-pricing.php.bak.20250921_000034:31:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+09-pricing.php.bak.20250921_000034:32:    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+09-pricing.php.bak.20250921_000034:47:      $pid = wc_get_product_id_by_sku($sku);
+04-resolve-map.php.bak:9:    $src  = $dir . '/validated.jsonl';
+04-resolve-map.php.bak:10:    if (!file_exists($src)) \WP_CLI::error('Falta validated.jsonl; corre validate.');
+10-publish.php.bak.20250920_222916:5: * Objetivo: Publicar productos ya preparados (mapeados, con precio y stock aplicados en stages previos).
+10-publish.php.bak.20250920_222916:25:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+10-publish.php.bak.20250920_222916:26:    if (!file_exists($src)) { \WP_CLI::error('Falta resolved/validated.jsonl'); }
+10-publish.php.bak.20250920_222916:41:      $pid = function_exists('wc_get_product_id_by_sku') ? wc_get_product_id_by_sku($sku) : 0;
+10-publish.php.bak.20250920_222916:67:        if (function_exists('wc_delete_product_transients')) { wc_delete_product_transients($pid); }
+10-publish.php.bak.20250920_222916:68:        if (function_exists('wc_update_product_lookup_tables')) { wc_update_product_lookup_tables($pid); }
+10-publish.php.bak.20250920_222916:71:        compu_import_log($run_id,'publish','info','Producto publicado/visible', ['post_id'=>$pid,'sku'=>$sku]);
+04-resolve-map.php.BAK.2025-09-30-212123:9:    $src  = $dir . '/validated.jsonl';
+04-resolve-map.php.BAK.2025-09-30-212123:10:    if (!file_exists($src)) \WP_CLI::error('Falta validated.jsonl; corre validate.');
+06-products.php.BAK.2025-10-01-182744:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-182744:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-182744:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-182744:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-182744:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-182744:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-182744:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-182744:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-182744:196:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-182744:233:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+11-report.php.bak.20250921_000034:7: * No modifica productos ni tablas de ofertas/precios.
+10-publish.php.bak.20250921_002023:4: * Objetivo: Publicar productos ya preparados (mapeados, con precio y stock aplicados en stages previos).
+10-publish.php.bak.20250921_002023:23:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+10-publish.php.bak.20250921_002023:24:    if (!file_exists($src)) { \WP_CLI::error('Falta resolved/validated.jsonl'); }
+10-publish.php.bak.20250921_002023:39:      $pid = function_exists('wc_get_product_id_by_sku') ? wc_get_product_id_by_sku($sku) : 0;
+10-publish.php.bak.20250921_002023:65:        if (function_exists('wc_delete_product_transients')) { wc_delete_product_transients($pid); }
+10-publish.php.bak.20250921_002023:66:        if (function_exists('wc_update_product_lookup_tables')) { wc_update_product_lookup_tables($pid); }
+10-publish.php.bak.20250921_002023:69:        compu_import_log($run_id,'publish','info','Producto publicado/visible', ['post_id'=>$pid,'sku'=>$sku]);
+08-offers.php.bak.2025-09-23_215305:23:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php.bak.2025-09-23_215305:44:  // intentamos mapear al product_id por SKU de Woo (si existe)
+08-offers.php.bak.2025-09-23_215305:45:  $pid = (function_exists('wc_get_product_id_by_sku')? wc_get_product_id_by_sku($sku) : 0);
+08-offers.php.bak.2025-09-23_215305:54:  // - product_id   := si se pudo resolver
+08-offers.php.bak.2025-09-23_215305:59:  $row = $wpdb->get_row($wpdb->prepare("SELECT id, price_cost, currency, stock, product_id FROM $table WHERE supplier_sku=%s",$sku), ARRAY_A);
+08-offers.php.bak.2025-09-23_215305:65:            || (($pid !== null) && (intval($row['product_id']) !== $pid));
+08-offers.php.bak.2025-09-23_215305:75:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+08-offers.php.bak.2025-09-23_215305:98:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+06-products.php:4: * Stage 06 - products (stable writer)
+06-products.php:29:function s06_log($msg) {
+06-products.php:55:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php:58:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php:64:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php:76:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php:80:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php:87:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php:197:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php:234:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+07-media.php.bak:14:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+07-media.php.bak:15:    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+07-media.php.bak:25:      $pid = wc_get_product_id_by_sku($sku);
+07-media.php.bak.2025-09-23_201032:30:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+07-media.php.bak.2025-09-23_201032:32:if (empty($rows)) { SLOG07("No hay datos en resolved/validated"); return; }
+07-media.php.bak.2025-09-23_201032:34:if (!function_exists('wc_get_product_id_by_sku')) { SLOG07("WooCommerce no cargado; abortando stage 07"); return; }
+07-media.php.bak.2025-09-23_201032:50:  $pid = wc_get_product_id_by_sku($sku);
+07-media.php.bak.2025-09-23_201032:51:  if(!$pid) { fputcsv($er,[$sku,$url,"product_not_found"]); $fail++; continue; }
+05-terms.php:33:    $in_validated = $run_dir . '/validated.jsonl';
+05-terms.php:36:    $input_file = file_exists($in_resolved) ? $in_resolved : (file_exists($in_validated) ? $in_validated : '');
+05-terms.php:38:      error_log("[05-terms] ERROR: No existe ni resolved.jsonl ni validated.jsonl en {$run_dir}");
+05-terms.php:102:        // Sin mapeo: 06 lo marcará como skipped (no_term_mapping_for_new_product)
+11-report.php.bak.20250921_002023:6: * No modifica productos ni tablas de ofertas/precios.
+09-pricing.php.bak.20250920_222916:6: * - Selecciona la mejor oferta (precio más bajo con stock) desde wp_compu_offers por producto.
+09-pricing.php.bak.20250920_222916:24:    if ($onlyExisting && !function_exists('wc_get_product_id_by_sku')) {
+09-pricing.php.bak.20250920_222916:25:      \WP_CLI::error('WooCommerce no disponible (wc_get_product_id_by_sku).');
+09-pricing.php.bak.20250920_222916:31:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+09-pricing.php.bak.20250920_222916:32:    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+09-pricing.php.bak.20250920_222916:47:      $pid = wc_get_product_id_by_sku($sku);
+08-offers.php.bak.2025-09-24_004823:37:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php.bak.2025-09-24_004823:59:  // intentamos mapear al product_id por SKU de Woo (si existe)
+08-offers.php.bak.2025-09-24_004823:60:  $pid = (function_exists('wc_get_product_id_by_sku')? wc_get_product_id_by_sku($sku) : 0);
+08-offers.php.bak.2025-09-24_004823:62:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php.bak.2025-09-24_004823:63:  if($product_id<=0){ $err++; $act="error"; SLOG08("NOPROD sku=".$sku); fputcsv($out,[$sku,0,$supplier,15,"MAIN",0,0,$currency,$act]); continue; }
+08-offers.php.bak.2025-09-24_004823:65:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php.bak.2025-09-24_004823:67:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php.bak.2025-09-24_004823:76:  // - product_id   := si se pudo resolver
+08-offers.php.bak.2025-09-24_004823:81:  $row = $wpdb->get_row($wpdb->prepare("SELECT id, price_cost, currency, stock, product_id FROM $table WHERE supplier_sku=%s",$sku), ARRAY_A);
+08-offers.php.bak.2025-09-24_004823:87:            || (($pid !== null) && (intval($row['product_id']) !== $pid));
+08-offers.php.bak.2025-09-24_004823:97:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+08-offers.php.bak.2025-09-24_004823:120:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+06-products.php.rej:1:--- includes/stages/06-products.php
+06-products.php.rej:2:+++ includes/stages/06-products.php
+05-terms.php.bak:46:        $brand_tax = 'product_brand';
+05-terms.php.bak:181:        $titulo = $this->val($data, ['Título','Titulo','title','product_title']);
+05-terms.php.bak:322:                $tt = get_term($ids['l3'], 'product_cat');
+05-terms.php.bak:325:                        $t2 = get_term($tt->parent, 'product_cat');
+05-terms.php.bak:329:                                $t1 = get_term($t2->parent, 'product_cat');
+05-terms.php.bak:342:            $t3 = get_term_by('name', $l3_name, 'product_cat');
+05-terms.php.bak:347:                    $t2 = get_term($t3->parent, 'product_cat');
+05-terms.php.bak:351:                            $t1 = get_term($t2->parent, 'product_cat');
+07-media.php.bak.20250921_000033:14:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+07-media.php.bak.20250921_000033:15:    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+07-media.php.bak.20250921_000033:25:      $pid = wc_get_product_id_by_sku($sku);
+10-publish.php.bak.20250921_000034:5: * Objetivo: Publicar productos ya preparados (mapeados, con precio y stock aplicados en stages previos).
+10-publish.php.bak.20250921_000034:25:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+10-publish.php.bak.20250921_000034:26:    if (!file_exists($src)) { \WP_CLI::error('Falta resolved/validated.jsonl'); }
+10-publish.php.bak.20250921_000034:41:      $pid = function_exists('wc_get_product_id_by_sku') ? wc_get_product_id_by_sku($sku) : 0;
+10-publish.php.bak.20250921_000034:67:        if (function_exists('wc_delete_product_transients')) { wc_delete_product_transients($pid); }
+10-publish.php.bak.20250921_000034:68:        if (function_exists('wc_update_product_lookup_tables')) { wc_update_product_lookup_tables($pid); }
+10-publish.php.bak.20250921_000034:71:        compu_import_log($run_id,'publish','info','Producto publicado/visible', ['post_id'=>$pid,'sku'=>$sku]);
+08-offers.php.bak.20250921_000033:18:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+08-offers.php.bak.20250921_000033:43:      // Mapeo: si viene "unmapped" o sin lvl3_id, podemos saltar (cuando el archivo es validated.jsonl puede no traer mapeo)
+08-offers.php.bak.20250921_000033:48:      if (function_exists('wc_get_product_id_by_sku')) { $post_id = intval(wc_get_product_id_by_sku($sku)); }
+08-offers.php.bak.20250921_000033:49:      if (!$post_id && function_exists('compu_import_find_product_id_by_sku')) { $post_id = intval(compu_import_find_product_id_by_sku($sku)); }
+08-offers.php.bak.20250921_000033:53:      if (!$post_id) { $skipped_mode++; continue; } // por simplicidad, solo upsert a productos existentes
+10-publish.php.bak:5: * Objetivo: Publicar productos ya preparados (mapeados, con precio y stock aplicados en stages previos).
+10-publish.php.bak:25:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+10-publish.php.bak:26:    if (!file_exists($src)) { \WP_CLI::error('Falta resolved/validated.jsonl'); }
+10-publish.php.bak:41:      $pid = function_exists('wc_get_product_id_by_sku') ? wc_get_product_id_by_sku($sku) : 0;
+10-publish.php.bak:67:        if (function_exists('wc_delete_product_transients')) { wc_delete_product_transients($pid); }
+10-publish.php.bak:68:        if (function_exists('wc_update_product_lookup_tables')) { wc_update_product_lookup_tables($pid); }
+10-publish.php.bak:71:        compu_import_log($run_id,'publish','info','Producto publicado/visible', ['post_id'=>$pid,'sku'=>$sku]);
+08-offers.php.bak.2025-09-23_212219:17:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php.bak.2025-09-23_212219:28:  $pid = (function_exists('wc_get_product_id_by_sku')?wc_get_product_id_by_sku($sku):0); if(!$pid){/*permitimos upsert sin PID*/}
+06-products.php.BAK.2025-09-21_210952:3: * Stage 06 — Products (minimal scope)
+06-products.php.BAK.2025-09-21_210952:6: *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+06-products.php.BAK.2025-09-21_210952:7: *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+06-products.php.BAK.2025-09-21_210952:8: *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+06-products.php.BAK.2025-09-21_210952:10: *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+06-products.php.BAK.2025-09-21_210952:24: *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+06-products.php.BAK.2025-09-21_210952:28: *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+06-products.php.BAK.2025-09-21_210952:88:function s06_log(string $msg) {
+06-products.php.BAK.2025-09-21_210952:95:s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+06-products.php.BAK.2025-09-21_210952:99:$inValidated = $RUN_DIR . '/validated.jsonl';
+06-products.php.BAK.2025-09-21_210952:100:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.BAK.2025-09-21_210952:102:    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+06-products.php.BAK.2025-09-21_210952:120:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-21_210952:126:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.BAK.2025-09-21_210952:135:function s06_clip(string $text, int $len=300): string {
+06-products.php.BAK.2025-09-21_210952:142:/** Insert or update row in wp_compu_products (minimal fields) */
+06-products.php.BAK.2025-09-21_210952:143:function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+06-products.php.BAK.2025-09-21_210952:145:    $table = $wpdb->prefix . 'compu_products';
+06-products.php.BAK.2025-09-21_210952:146:    $name  = s06_build_name($row);
+06-products.php.BAK.2025-09-21_210952:147:    $short = s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+06-products.php.BAK.2025-09-21_210952:148:    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.BAK.2025-09-21_210952:149:    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+06-products.php.BAK.2025-09-21_210952:153:        'wp_post_id'        => $product_id,
+06-products.php.BAK.2025-09-21_210952:161:    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+06-products.php.BAK.2025-09-21_210952:174:function s06_build_name(array $row): string {
+06-products.php.BAK.2025-09-21_210952:176:    $brand = trim((string) s06_first($row, ['brand','marca'], ''));
+06-products.php.BAK.2025-09-21_210952:177:    $model = trim((string) s06_first($row, ['model','modelo'], ''));
+06-products.php.BAK.2025-09-21_210952:178:    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+06-products.php.BAK.2025-09-21_210952:185:/** Find product by SKU */
+06-products.php.BAK.2025-09-21_210952:186:function s06_find_product_id_by_sku(string $sku): ?int {
+06-products.php.BAK.2025-09-21_210952:192:/** Create or update product shell */
+06-products.php.BAK.2025-09-21_210952:193:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.BAK.2025-09-21_210952:194:    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave']));
+06-products.php.BAK.2025-09-21_210952:198:    $pidExisting = s06_find_product_id_by_sku($sku);
+06-products.php.BAK.2025-09-21_210952:201:    $termId = (int) s06_first($row, ['term_id','termId','woo_term_id','category_id'], 0);
+06-products.php.BAK.2025-09-21_210952:207:    $name = s06_build_name($row);
+06-products.php.BAK.2025-09-21_210952:208:    $short= s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], $name));
+06-products.php.BAK.2025-09-21_210952:209:    $long = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.BAK.2025-09-21_210952:218:        // Minimal product updates
+06-products.php.BAK.2025-09-21_210952:237:        'post_type'   => 'product',
+06-products.php.BAK.2025-09-21_210952:249:    // Set SKU & basic product type
+06-products.php.BAK.2025-09-21_210952:251:    wp_set_object_terms($pid, 'simple', 'product_type');
+06-products.php.BAK.2025-09-21_210952:260:if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+06-products.php.BAK.2025-09-21_210952:273:    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave'], ''));
+06-products.php.BAK.2025-09-21_210952:276:    $out = ['sku'=>$sku, 'product_id'=>'', 'action'=>'', 'reason'=>''];
+06-products.php.BAK.2025-09-21_210952:278:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $out);
+06-products.php.BAK.2025-09-21_210952:285:    // Write to compu_products (minimal fields)
+06-products.php.BAK.2025-09-21_210952:286:    s06_upsert_compu_product($sku, $row, (int)$pid, $DRY);
+06-products.php.BAK.2025-09-21_210952:289:    $out['product_id'] = (string) $pid;
+06-products.php.BAK.2025-09-21_210952:319:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-21_210952:323:    'stage'     => '06-products-minimal',
+06-products.php.BAK.2025-10-01-025122:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-025122:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-025122:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-025122:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-025122:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-025122:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-025122:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-025122:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-025122:126:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-025122:163:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+08-offers.php.bak.2025-09-23_215758:23:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php.bak.2025-09-23_215758:44:  // intentamos mapear al product_id por SKU de Woo (si existe)
+08-offers.php.bak.2025-09-23_215758:45:  $pid = (function_exists('wc_get_product_id_by_sku')? wc_get_product_id_by_sku($sku) : 0);
+08-offers.php.bak.2025-09-23_215758:47:  $product_id = intval($pid ?: 0); $supplier_sku = $sku;
+08-offers.php.bak.2025-09-23_215758:56:  // - product_id   := si se pudo resolver
+08-offers.php.bak.2025-09-23_215758:61:  $row = $wpdb->get_row($wpdb->prepare("SELECT id, price_cost, currency, stock, product_id FROM $table WHERE supplier_sku=%s",$sku), ARRAY_A);
+08-offers.php.bak.2025-09-23_215758:67:            || (($pid !== null) && (intval($row['product_id']) !== $pid));
+08-offers.php.bak.2025-09-23_215758:77:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+08-offers.php.bak.2025-09-23_215758:100:    if ($pid !== null) { $data['product_id'] = $pid; $fmt[] = '%d'; }
+06-products.php.BAK.2025-09-30-210125:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-09-30-210125:28:function s06_log($msg) {
+06-products.php.BAK.2025-09-30-210125:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-09-30-210125:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-30-210125:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-09-30-210125:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-09-30-210125:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-09-30-210125:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-09-30-210125:143:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+09-pricing.php.bak.20250921_002507:5: * - Selecciona la mejor oferta (precio más bajo con stock) desde wp_compu_offers por producto.
+09-pricing.php.bak.20250921_002507:22:    if ($onlyExisting && !function_exists('wc_get_product_id_by_sku')) {
+09-pricing.php.bak.20250921_002507:23:      \WP_CLI::error('WooCommerce no disponible (wc_get_product_id_by_sku).');
+09-pricing.php.bak.20250921_002507:29:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+09-pricing.php.bak.20250921_002507:30:    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+09-pricing.php.bak.20250921_002507:45:      $pid = wc_get_product_id_by_sku($sku);
+08-offers.php.bak.2025-09-23_205112:17:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php.bak.2025-09-23_205112:28:  $pid = (function_exists('wc_get_product_id_by_sku')?wc_get_product_id_by_sku($sku):0); if(!$pid){/*permitimos upsert sin PID*/}
+09-pricing.php:15:if (!function_exists('wc_get_product_id_by_sku')) { SLOG09("WooCommerce no cargado; abortando stage 09"); return; }
+09-pricing.php:45:  $pid=wc_get_product_id_by_sku($sku); if(!$pid){fputcsv($csve,[$sku,"product_not_found"]);$err++;continue;}
+09-pricing.php:46:  $p=wc_get_product($pid); if(!$p){fputcsv($csve,[$sku,"wc_get_product_failed"]);$err++;continue;}
+06-products.php.bak.20250921_000033:3: * Stage 06 — Products (minimal scope)
+06-products.php.bak.20250921_000033:6: *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+06-products.php.bak.20250921_000033:7: *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+06-products.php.bak.20250921_000033:8: *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+06-products.php.bak.20250921_000033:10: *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+06-products.php.bak.20250921_000033:26: *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+06-products.php.bak.20250921_000033:30: *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+06-products.php.bak.20250921_000033:69:function s06_log(string $msg) {
+06-products.php.bak.20250921_000033:76:s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+06-products.php.bak.20250921_000033:80:$inValidated = $RUN_DIR . '/validated.jsonl';
+06-products.php.bak.20250921_000033:81:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.bak.20250921_000033:83:    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+06-products.php.bak.20250921_000033:91:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.bak.20250921_000033:97:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.bak.20250921_000033:106:function s06_build_name(array $row): string {
+06-products.php.bak.20250921_000033:107:    $brand = trim((string) s06_first($row, ['brand','marca','Marca'], ''));
+06-products.php.bak.20250921_000033:108:    $model = trim((string) s06_first($row, ['model','modelo','Modelo','sku','SKU'], ''));
+06-products.php.bak.20250921_000033:109:    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+06-products.php.bak.20250921_000033:112:    return $name !== '' ? $name : ($model ?: $title ?: 'Producto sin nombre');
+06-products.php.bak.20250921_000033:115:function s06_clip(?string $text, int $len=240): string {
+06-products.php.bak.20250921_000033:122:/** Insert or update row in wp_compu_products (minimal fields) */
+06-products.php.bak.20250921_000033:123:function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+06-products.php.bak.20250921_000033:125:    $table = $wpdb->prefix . 'compu_products';
+06-products.php.bak.20250921_000033:126:    $name  = s06_build_name($row);
+06-products.php.bak.20250921_000033:127:    $short = s06_clip(s06_first($row, ['short_description','short','Resumen','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+06-products.php.bak.20250921_000033:128:    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.bak.20250921_000033:129:    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+06-products.php.bak.20250921_000033:133:        'wp_post_id'        => $product_id,
+06-products.php.bak.20250921_000033:141:    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+06-products.php.bak.20250921_000033:154:function s06_apply_inventory_and_weight(int $product_id, array $row, int $DRY): void {
+06-products.php.bak.20250921_000033:155:    $stock  = (int) s06_first($row, ['stock','existencias','Existencias'], 0);
+06-products.php.bak.20250921_000033:156:    $weight = s06_first($row, ['weight','peso_kg','Peso Kg'], null);
+06-products.php.bak.20250921_000033:159:        update_post_meta($product_id, '_manage_stock', 'yes');
+06-products.php.bak.20250921_000033:160:        update_post_meta($product_id, '_stock', max(0, $stock));
+06-products.php.bak.20250921_000033:161:        update_post_meta($product_id, '_stock_status', $stock > 0 ? 'instock' : 'outofstock');
+06-products.php.bak.20250921_000033:163:            update_post_meta($product_id, '_weight', (string) $weight);
+06-products.php.bak.20250921_000033:168:/** Find product by SKU */
+06-products.php.bak.20250921_000033:169:function s06_find_product_id_by_sku(string $sku): int {
+06-products.php.bak.20250921_000033:170:    if (function_exists('wc_get_product_id_by_sku')) {
+06-products.php.bak.20250921_000033:171:        $pid = (int) wc_get_product_id_by_sku($sku);
+06-products.php.bak.20250921_000033:182:/** Create or update the Woo product shell */
+06-products.php.bak.20250921_000033:183:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.bak.20250921_000033:184:    $sku = trim((string) s06_first($row, ['sku','SKU','model','modelo','Modelo'], ''));
+06-products.php.bak.20250921_000033:187:    $pidExisting = s06_find_product_id_by_sku($sku);
+06-products.php.bak.20250921_000033:190:    $termId = s06_first($row, ['term_id','category_term_id','termId','term'], null);
+06-products.php.bak.20250921_000033:192:        $out['reason'] = 'no_term_mapping_for_new_product';
+06-products.php.bak.20250921_000033:196:    $name   = s06_build_name($row);
+06-products.php.bak.20250921_000033:197:    $long   = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.bak.20250921_000033:198:    $short  = s06_clip(s06_first($row, ['short_description','short','Resumen','resumen'], $long));
+06-products.php.bak.20250921_000033:221:        'post_type'   => 'product',
+06-products.php.bak.20250921_000033:233:    // Set SKU & basic product type
+06-products.php.bak.20250921_000033:235:    wp_set_object_terms($pid, 'simple', 'product_type');
+06-products.php.bak.20250921_000033:244:if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+06-products.php.bak.20250921_000033:257:    $sku = trim((string) s06_first($row, ['sku','SKU','model','modelo','Modelo'], ''));
+06-products.php.bak.20250921_000033:258:    $report = ['sku' => $sku, 'product_id' => '', 'action' => '', 'reason' => ''];
+06-products.php.bak.20250921_000033:260:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $report);
+06-products.php.bak.20250921_000033:264:        s06_log("SKIP sku=$sku reason=" . ($report['reason'] ?: 'unknown'));
+06-products.php.bak.20250921_000033:270:        s06_apply_inventory_and_weight($pid, $row, $DRY);
+06-products.php.bak.20250921_000033:273:        s06_upsert_compu_product($sku, $row, $pid, $DRY);
+06-products.php.bak.20250921_000033:275:        $report['product_id'] = (string) $pid;
+06-products.php.bak.20250921_000033:278:            s06_log("UPDATED sku=$sku pid=$pid");
+06-products.php.bak.20250921_000033:281:            s06_log("IMPORTED sku=$sku pid=$pid");
+06-products.php.bak.20250921_000033:287:        s06_log("DRY-IMPORTED (simulated) sku=$sku");
+06-products.php.bak.20250921_000033:297:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.bak.20250921_000033:301:    'stage'     => '06-products-minimal',
+03-validate.php.bak:4:class Compu_Stage_Validate {
+03-validate.php.bak:12:    $out  = $dir . '/validated.jsonl';
+03-validate.php.bak:22:        compu_import_log($run_id,'validate','error','Fila inválida: '.implode('; ', $errors), $r, isset($r['row_key'])?$r['row_key']:null);
+03-validate.php.bak:28:    compu_import_log($run_id,'validate','info','Validación completa', ['ok'=>$ok,'err'=>$err]);
+10-publish.php:7:if (!function_exists('wc_get_products')) { fwrite(STDERR,"[10] WooCommerce no cargado\n"); return; }
+10-publish.php:15:$ids = wc_get_products($args);
+10-publish.php:18:  $p=wc_get_product($pid); if(!$p)continue;
+07-media.php.bak.20250921_002507:12:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+07-media.php.bak.20250921_002507:13:    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+07-media.php.bak.20250921_002507:23:      $pid = wc_get_product_id_by_sku($sku);
+11-report.php.bak.20250920_222916:7: * No modifica productos ni tablas de ofertas/precios.
+04-resolve-map.php.BAK.2025-09-30-222614:9:    $src  = $dir . '/validated.jsonl';
+04-resolve-map.php.BAK.2025-09-30-222614:10:    if (!file_exists($src)) \WP_CLI::error('Falta validated.jsonl; corre validate.');
+06-products.php.BAK.2025-09-21_205246:3: * Stage 06 — Products (minimal scope)
+06-products.php.BAK.2025-09-21_205246:6: *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+06-products.php.BAK.2025-09-21_205246:7: *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+06-products.php.BAK.2025-09-21_205246:8: *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+06-products.php.BAK.2025-09-21_205246:10: *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+06-products.php.BAK.2025-09-21_205246:24: *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+06-products.php.BAK.2025-09-21_205246:28: *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+06-products.php.BAK.2025-09-21_205246:88:function s06_log(string $msg) {
+06-products.php.BAK.2025-09-21_205246:95:s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+06-products.php.BAK.2025-09-21_205246:99:$inValidated = $RUN_DIR . '/validated.jsonl';
+06-products.php.BAK.2025-09-21_205246:100:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.BAK.2025-09-21_205246:102:    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+06-products.php.BAK.2025-09-21_205246:120:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-21_205246:126:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.BAK.2025-09-21_205246:135:function s06_clip(string $text, int $len=300): string {
+06-products.php.BAK.2025-09-21_205246:142:/** Insert or update row in wp_compu_products (minimal fields) */
+06-products.php.BAK.2025-09-21_205246:143:function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+06-products.php.BAK.2025-09-21_205246:145:    $table = $wpdb->prefix . 'compu_products';
+06-products.php.BAK.2025-09-21_205246:146:    $name  = s06_build_name($row);
+06-products.php.BAK.2025-09-21_205246:147:    $short = s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+06-products.php.BAK.2025-09-21_205246:148:    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.BAK.2025-09-21_205246:149:    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+06-products.php.BAK.2025-09-21_205246:153:        'wp_post_id'        => $product_id,
+06-products.php.BAK.2025-09-21_205246:161:    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+06-products.php.BAK.2025-09-21_205246:174:function s06_build_name(array $row): string {
+06-products.php.BAK.2025-09-21_205246:176:    $brand = trim((string) s06_first($row, ['brand','marca'], ''));
+06-products.php.BAK.2025-09-21_205246:177:    $model = trim((string) s06_first($row, ['model','modelo'], ''));
+06-products.php.BAK.2025-09-21_205246:178:    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+06-products.php.BAK.2025-09-21_205246:185:/** Find product by SKU */
+06-products.php.BAK.2025-09-21_205246:186:function s06_find_product_id_by_sku(string $sku): ?int {
+06-products.php.BAK.2025-09-21_205246:192:/** Create or update product shell */
+06-products.php.BAK.2025-09-21_205246:193:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.BAK.2025-09-21_205246:194:    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave']));
+06-products.php.BAK.2025-09-21_205246:198:    $pidExisting = s06_find_product_id_by_sku($sku);
+06-products.php.BAK.2025-09-21_205246:201:    $termId = (int) s06_first($row, ['term_id','termId','woo_term_id','category_id'], 0);
+06-products.php.BAK.2025-09-21_205246:207:    $name = s06_build_name($row);
+06-products.php.BAK.2025-09-21_205246:208:    $short= s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], $name));
+06-products.php.BAK.2025-09-21_205246:209:    $long = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.BAK.2025-09-21_205246:218:        // Minimal product updates
+06-products.php.BAK.2025-09-21_205246:237:        'post_type'   => 'product',
+06-products.php.BAK.2025-09-21_205246:249:    // Set SKU & basic product type
+06-products.php.BAK.2025-09-21_205246:251:    wp_set_object_terms($pid, 'simple', 'product_type');
+06-products.php.BAK.2025-09-21_205246:260:if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+06-products.php.BAK.2025-09-21_205246:273:    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave'], ''));
+06-products.php.BAK.2025-09-21_205246:276:    $out = ['sku'=>$sku, 'product_id'=>'', 'action'=>'', 'reason'=>''];
+06-products.php.BAK.2025-09-21_205246:278:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $out);
+06-products.php.BAK.2025-09-21_205246:285:    // Write to compu_products (minimal fields)
+06-products.php.BAK.2025-09-21_205246:286:    s06_upsert_compu_product($sku, $row, (int)$pid, $DRY);
+06-products.php.BAK.2025-09-21_205246:289:    $out['product_id'] = (string) $pid;
+06-products.php.BAK.2025-09-21_205246:319:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-21_205246:323:    'stage'     => '06-products-minimal',
+06-products.php.orig:3: * Stage 06 - products (stable writer)
+06-products.php.orig:28:function s06_log($msg) {
+06-products.php.orig:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.orig:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.orig:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.orig:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.orig:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.orig:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.orig:196:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.orig:233:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-10-01-183919:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-183919:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-183919:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-183919:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-183919:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-183919:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-183919:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-183919:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-183919:196:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-183919:233:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-10-01-180948:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-180948:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-180948:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-180948:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-180948:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-180948:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-180948:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-180948:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-180948:196:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-180948:233:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+09-pricing.php.bak:6: * - Selecciona la mejor oferta (precio más bajo con stock) desde wp_compu_offers por producto.
+09-pricing.php.bak:24:    if ($onlyExisting && !function_exists('wc_get_product_id_by_sku')) {
+09-pricing.php.bak:25:      \WP_CLI::error('WooCommerce no disponible (wc_get_product_id_by_sku).');
+09-pricing.php.bak:31:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+09-pricing.php.bak:32:    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+09-pricing.php.bak:47:      $pid = wc_get_product_id_by_sku($sku);
+09-pricing.php.bak.2025-09-23_201032:14:if (!function_exists('wc_get_product_id_by_sku')) { SLOG09("WooCommerce no cargado; abortando stage 09"); return; }
+09-pricing.php.bak.2025-09-23_201032:44:  $pid=wc_get_product_id_by_sku($sku); if(!$pid){fputcsv($csve,[$sku,"product_not_found"]);$err++;continue;}
+09-pricing.php.bak.2025-09-23_201032:45:  $p=wc_get_product($pid); if(!$p){fputcsv($csve,[$sku,"wc_get_product_failed"]);$err++;continue;}
+08-offers.php.bak.2025-09-23_202949:17:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php.bak.2025-09-23_202949:28:  $pid = (function_exists('wc_get_product_id_by_sku')?wc_get_product_id_by_sku($sku):0); if(!$pid){/*permitimos upsert sin PID*/}
+06-products.php.BAK.2025-10-01-182051:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-182051:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-182051:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-182051:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-182051:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-182051:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-182051:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-182051:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-182051:196:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-182051:233:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-10-01-183022:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-183022:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-183022:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-183022:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-183022:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-183022:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-183022:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-183022:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-183022:196:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-183022:233:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+08-offers.php.bak.20250920_222916:18:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+08-offers.php.bak.20250920_222916:43:      // Mapeo: si viene "unmapped" o sin lvl3_id, podemos saltar (cuando el archivo es validated.jsonl puede no traer mapeo)
+08-offers.php.bak.20250920_222916:48:      if (function_exists('wc_get_product_id_by_sku')) { $post_id = intval(wc_get_product_id_by_sku($sku)); }
+08-offers.php.bak.20250920_222916:49:      if (!$post_id && function_exists('compu_import_find_product_id_by_sku')) { $post_id = intval(compu_import_find_product_id_by_sku($sku)); }
+08-offers.php.bak.20250920_222916:53:      if (!$post_id) { $skipped_mode++; continue; } // por simplicidad, solo upsert a productos existentes
+06-products.php.OFF:3: * Stage 06 — Products (minimal scope)
+06-products.php.OFF:6: *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+06-products.php.OFF:7: *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+06-products.php.OFF:8: *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+06-products.php.OFF:10: *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+06-products.php.OFF:26: *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+06-products.php.OFF:30: *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+06-products.php.OFF:69:function s06_log(string $msg) {
+06-products.php.OFF:76:s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+06-products.php.OFF:80:$inValidated = $RUN_DIR . '/validated.jsonl';
+06-products.php.OFF:81:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.OFF:83:    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+06-products.php.OFF:91:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.OFF:97:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.OFF:106:function s06_build_name(array $row): string {
+06-products.php.OFF:107:    $brand = trim((string) s06_first($row, ['brand','marca','Marca'], ''));
+06-products.php.OFF:108:    $model = trim((string) s06_first($row, ['model','modelo','Modelo','sku','SKU'], ''));
+06-products.php.OFF:109:    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+06-products.php.OFF:112:    return $name !== '' ? $name : ($model ?: $title ?: 'Producto sin nombre');
+06-products.php.OFF:115:function s06_clip(?string $text, int $len=240): string {
+06-products.php.OFF:122:/** Insert or update row in wp_compu_products (minimal fields) */
+06-products.php.OFF:123:function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+06-products.php.OFF:125:    $table = $wpdb->prefix . 'compu_products';
+06-products.php.OFF:126:    $name  = s06_build_name($row);
+06-products.php.OFF:127:    $short = s06_clip(s06_first($row, ['short_description','short','Resumen','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+06-products.php.OFF:128:    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.OFF:129:    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+06-products.php.OFF:133:        'wp_post_id'        => $product_id,
+06-products.php.OFF:141:    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+06-products.php.OFF:154:function s06_apply_inventory_and_weight(int $product_id, array $row, int $DRY): void {
+06-products.php.OFF:155:    $stock  = (int) s06_first($row, ['stock','existencias','Existencias'], 0);
+06-products.php.OFF:156:    $weight = s06_first($row, ['weight','peso_kg','Peso Kg'], null);
+06-products.php.OFF:159:        update_post_meta($product_id, '_manage_stock', 'yes');
+06-products.php.OFF:160:        update_post_meta($product_id, '_stock', max(0, $stock));
+06-products.php.OFF:161:        update_post_meta($product_id, '_stock_status', $stock > 0 ? 'instock' : 'outofstock');
+06-products.php.OFF:163:            update_post_meta($product_id, '_weight', (string) $weight);
+06-products.php.OFF:168:/** Find product by SKU */
+06-products.php.OFF:169:function s06_find_product_id_by_sku(string $sku): int {
+06-products.php.OFF:170:    if (function_exists('wc_get_product_id_by_sku')) {
+06-products.php.OFF:171:        $pid = (int) wc_get_product_id_by_sku($sku);
+06-products.php.OFF:182:/** Create or update the Woo product shell */
+06-products.php.OFF:183:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.OFF:184:    $sku = trim((string) s06_first($row, ['sku','SKU','model','modelo','Modelo'], ''));
+06-products.php.OFF:187:    $pidExisting = s06_find_product_id_by_sku($sku);
+06-products.php.OFF:190:    $termId = s06_first($row, ['term_id','category_term_id','termId','term'], null);
+06-products.php.OFF:192:        $out['reason'] = 'no_term_mapping_for_new_product';
+06-products.php.OFF:196:    $name   = s06_build_name($row);
+06-products.php.OFF:197:    $long   = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.OFF:198:    $short  = s06_clip(s06_first($row, ['short_description','short','Resumen','resumen'], $long));
+06-products.php.OFF:221:        'post_type'   => 'product',
+06-products.php.OFF:233:    // Set SKU & basic product type
+06-products.php.OFF:235:    wp_set_object_terms($pid, 'simple', 'product_type');
+06-products.php.OFF:244:if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+06-products.php.OFF:257:    $sku = trim((string) s06_first($row, ['sku','SKU','model','modelo','Modelo'], ''));
+06-products.php.OFF:258:    $report = ['sku' => $sku, 'product_id' => '', 'action' => '', 'reason' => ''];
+06-products.php.OFF:260:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $report);
+06-products.php.OFF:264:        s06_log("SKIP sku=$sku reason=" . ($report['reason'] ?: 'unknown'));
+06-products.php.OFF:270:        s06_apply_inventory_and_weight($pid, $row, $DRY);
+06-products.php.OFF:273:        s06_upsert_compu_product($sku, $row, $pid, $DRY);
+06-products.php.OFF:275:        $report['product_id'] = (string) $pid;
+06-products.php.OFF:278:            s06_log("UPDATED sku=$sku pid=$pid");
+06-products.php.OFF:281:            s06_log("IMPORTED sku=$sku pid=$pid");
+06-products.php.OFF:287:        s06_log("DRY-IMPORTED (simulated) sku=$sku");
+06-products.php.OFF:297:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.OFF:301:    'stage'     => '06-products-minimal',
+logs/stage06.log:2:[2025-09-30 04:56:29] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:5:[2025-10-01 02:08:45] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:8:[2025-10-01 02:12:10] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:11:[2025-10-01 02:15:14] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:14:[2025-10-01 02:51:22] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:17:[2025-10-01 03:56:16] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:20:[2025-10-01 04:00:36] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:23:[2025-10-01 04:04:44] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:26:[2025-10-01 04:10:54] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:29:[2025-10-01 04:16:25] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:32:[2025-10-01 04:29:01] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+logs/stage06.log:35:[2025-10-01 19:11:38] stage06: OPENED_CSV final/imported.csv, updated.csv, skipped.csv
+06-products.php.BAK.2025-09-21_210502:3: * Stage 06 — Products (minimal scope)
+06-products.php.BAK.2025-09-21_210502:6: *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+06-products.php.BAK.2025-09-21_210502:7: *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+06-products.php.BAK.2025-09-21_210502:8: *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+06-products.php.BAK.2025-09-21_210502:10: *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+06-products.php.BAK.2025-09-21_210502:24: *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+06-products.php.BAK.2025-09-21_210502:28: *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+06-products.php.BAK.2025-09-21_210502:88:function s06_log(string $msg) {
+06-products.php.BAK.2025-09-21_210502:95:s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+06-products.php.BAK.2025-09-21_210502:99:$inValidated = $RUN_DIR . '/validated.jsonl';
+06-products.php.BAK.2025-09-21_210502:100:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.BAK.2025-09-21_210502:102:    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+06-products.php.BAK.2025-09-21_210502:120:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-21_210502:126:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.BAK.2025-09-21_210502:135:function s06_clip(string $text, int $len=300): string {
+06-products.php.BAK.2025-09-21_210502:142:/** Insert or update row in wp_compu_products (minimal fields) */
+06-products.php.BAK.2025-09-21_210502:143:function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+06-products.php.BAK.2025-09-21_210502:145:    $table = $wpdb->prefix . 'compu_products';
+06-products.php.BAK.2025-09-21_210502:146:    $name  = s06_build_name($row);
+06-products.php.BAK.2025-09-21_210502:147:    $short = s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+06-products.php.BAK.2025-09-21_210502:148:    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.BAK.2025-09-21_210502:149:    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+06-products.php.BAK.2025-09-21_210502:153:        'wp_post_id'        => $product_id,
+06-products.php.BAK.2025-09-21_210502:161:    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+06-products.php.BAK.2025-09-21_210502:174:function s06_build_name(array $row): string {
+06-products.php.BAK.2025-09-21_210502:176:    $brand = trim((string) s06_first($row, ['brand','marca'], ''));
+06-products.php.BAK.2025-09-21_210502:177:    $model = trim((string) s06_first($row, ['model','modelo'], ''));
+06-products.php.BAK.2025-09-21_210502:178:    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+06-products.php.BAK.2025-09-21_210502:185:/** Find product by SKU */
+06-products.php.BAK.2025-09-21_210502:186:function s06_find_product_id_by_sku(string $sku): ?int {
+06-products.php.BAK.2025-09-21_210502:192:/** Create or update product shell */
+06-products.php.BAK.2025-09-21_210502:193:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.BAK.2025-09-21_210502:194:    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave']));
+06-products.php.BAK.2025-09-21_210502:198:    $pidExisting = s06_find_product_id_by_sku($sku);
+06-products.php.BAK.2025-09-21_210502:201:    $termId = (int) s06_first($row, ['term_id','termId','woo_term_id','category_id'], 0);
+06-products.php.BAK.2025-09-21_210502:207:    $name = s06_build_name($row);
+06-products.php.BAK.2025-09-21_210502:208:    $short= s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], $name));
+06-products.php.BAK.2025-09-21_210502:209:    $long = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.BAK.2025-09-21_210502:218:        // Minimal product updates
+06-products.php.BAK.2025-09-21_210502:237:        'post_type'   => 'product',
+06-products.php.BAK.2025-09-21_210502:249:    // Set SKU & basic product type
+06-products.php.BAK.2025-09-21_210502:251:    wp_set_object_terms($pid, 'simple', 'product_type');
+06-products.php.BAK.2025-09-21_210502:260:if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+06-products.php.BAK.2025-09-21_210502:273:    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave'], ''));
+06-products.php.BAK.2025-09-21_210502:276:    $out = ['sku'=>$sku, 'product_id'=>'', 'action'=>'', 'reason'=>''];
+06-products.php.BAK.2025-09-21_210502:278:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $out);
+06-products.php.BAK.2025-09-21_210502:285:    // Write to compu_products (minimal fields)
+06-products.php.BAK.2025-09-21_210502:286:    s06_upsert_compu_product($sku, $row, (int)$pid, $DRY);
+06-products.php.BAK.2025-09-21_210502:289:    $out['product_id'] = (string) $pid;
+06-products.php.BAK.2025-09-21_210502:319:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-21_210502:323:    'stage'     => '06-products-minimal',
+07-media.php.bak.20250920_222916:14:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+07-media.php.bak.20250920_222916:15:    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+07-media.php.bak.20250920_222916:25:      $pid = wc_get_product_id_by_sku($sku);
+06-products.php.BAK.2025-10-01-022119:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-022119:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-022119:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-022119:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-022119:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-022119:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-022119:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-022119:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-022119:126:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-022119:163:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-22_012110:3: * Stage 06 — Products (safe writer, web-safe)
+06-products.php.BAK.2025-09-22_012110:4: * - Reads RUN_DIR/resolved.jsonl (or validated.jsonl as fallback)
+06-products.php.BAK.2025-09-22_012110:25:    if (function_exists("s06_log")) {
+06-products.php.BAK.2025-09-22_012110:26:      s06_log("FATAL shutdown type={$e["type"]} file={$e["file"]}:{} msg={$e["message"]}");
+06-products.php.BAK.2025-09-22_012110:42:function s06_log($msg) {
+06-products.php.BAK.2025-09-22_012110:58:    $cand2 = $RUN_DIR . '/validated.jsonl';
+06-products.php.BAK.2025-09-22_012110:68:s06_log("START RUN_ID={$RUN_ID} RUN_DIR={$RUN_DIR} DRY_RUN={$DRY_RUN} LIMIT={$LIMIT} OFFSET={$OFFSET} INPUT={$INPUT}");
+06-products.php.BAK.2025-09-22_012110:71:// Not strictly needed for the safe-writer, but harmless if present.
+06-products.php.BAK.2025-09-22_012110:73:    // Derive /wp-load.php from plugin path depth: .../wp-content/plugins/.../includes/stages/06-products.php
+06-products.php.BAK.2025-09-22_012110:77:        s06_log('WP bootstrap OK');
+06-products.php.BAK.2025-09-22_012110:79:        s06_log("WP bootstrap SKIPPED (not readable: {$wpLoad})");
+06-products.php.BAK.2025-09-22_012110:84:$csvHeader  = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-22_012110:90:    s06_log("FATAL could not open CSVs in {$FINAL_DIR}");
+06-products.php.BAK.2025-09-22_012110:100:s06_log('OPENED_CSV final/imported.csv, updated.csv, skipped.csv');
+06-products.php.BAK.2025-09-22_012110:104:    s06_log("FATAL input not readable: {$INPUT}");
+06-products.php.BAK.2025-09-22_012110:114:    s06_log("FATAL failed fopen: {$INPUT}");
+06-products.php.BAK.2025-09-22_012110:174:s06_log("DONE processed={$processed} created={$created} updated={$updated} skipped={$skipped}");
+06-products.php.BAK.2025-09-22_012110:178:    'stage'     => '06-products-minimal',
+06-products.php.BAK.2025-09-21_233106:3: * Stage 06 — Products (minimal scope)
+06-products.php.BAK.2025-09-21_233106:6: *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+06-products.php.BAK.2025-09-21_233106:7: *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+06-products.php.BAK.2025-09-21_233106:8: *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+06-products.php.BAK.2025-09-21_233106:10: *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+06-products.php.BAK.2025-09-21_233106:26: *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+06-products.php.BAK.2025-09-21_233106:30: *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+06-products.php.BAK.2025-09-21_233106:75:function s06_log(string $msg) {
+06-products.php.BAK.2025-09-21_233106:82:s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+06-products.php.BAK.2025-09-21_233106:86:$inValidated = $RUN_DIR . '/validated.jsonl';
+06-products.php.BAK.2025-09-21_233106:87:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.BAK.2025-09-21_233106:89:    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+06-products.php.BAK.2025-09-21_233106:107:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-21_233106:113:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.BAK.2025-09-21_233106:122:function s06_build_name(array $row): string {
+06-products.php.BAK.2025-09-21_233106:123:    $brand = trim((string) s06_first($row, ['brand','marca','Marca'], ''));
+06-products.php.BAK.2025-09-21_233106:124:    $model = trim((string) s06_first($row, ['model','modelo','Modelo','sku','SKU'], ''));
+06-products.php.BAK.2025-09-21_233106:125:    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+06-products.php.BAK.2025-09-21_233106:128:    return $name !== '' ? $name : ($model ?: $title ?: 'Producto sin nombre');
+06-products.php.BAK.2025-09-21_233106:131:function s06_clip(?string $text, int $len=240): string {
+06-products.php.BAK.2025-09-21_233106:138:/** Insert or update row in wp_compu_products (minimal fields) */
+06-products.php.BAK.2025-09-21_233106:139:function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+06-products.php.BAK.2025-09-21_233106:141:    $table = $wpdb->prefix . 'compu_products';
+06-products.php.BAK.2025-09-21_233106:142:    $name  = s06_build_name($row);
+06-products.php.BAK.2025-09-21_233106:143:    $short = s06_clip(s06_first($row, ['short_description','short','Resumen','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+06-products.php.BAK.2025-09-21_233106:144:    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.BAK.2025-09-21_233106:145:    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+06-products.php.BAK.2025-09-21_233106:149:        'wp_post_id'        => $product_id,
+06-products.php.BAK.2025-09-21_233106:157:    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+06-products.php.BAK.2025-09-21_233106:170:function s06_apply_inventory_and_weight(int $product_id, array $row, int $DRY): void {
+06-products.php.BAK.2025-09-21_233106:171:    $stock  = (int) s06_first($row, ['stock','existencias','Existencias'], 0);
+06-products.php.BAK.2025-09-21_233106:172:    $weight = s06_first($row, ['weight','peso_kg','Peso Kg'], null);
+06-products.php.BAK.2025-09-21_233106:175:        update_post_meta($product_id, '_manage_stock', 'yes');
+06-products.php.BAK.2025-09-21_233106:176:        update_post_meta($product_id, '_stock', max(0, $stock));
+06-products.php.BAK.2025-09-21_233106:177:        update_post_meta($product_id, '_stock_status', $stock > 0 ? 'instock' : 'outofstock');
+06-products.php.BAK.2025-09-21_233106:179:            update_post_meta($product_id, '_weight', (string) $weight);
+06-products.php.BAK.2025-09-21_233106:184:/** Find product by SKU */
+06-products.php.BAK.2025-09-21_233106:185:function s06_find_product_id_by_sku(string $sku): int {
+06-products.php.BAK.2025-09-21_233106:186:    if (function_exists('wc_get_product_id_by_sku')) {
+06-products.php.BAK.2025-09-21_233106:187:        $pid = (int) wc_get_product_id_by_sku($sku);
+06-products.php.BAK.2025-09-21_233106:198:/** Create or update the Woo product shell */
+06-products.php.BAK.2025-09-21_233106:199:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.BAK.2025-09-21_233106:200:    $sku = trim((string) s06_first($row, ['sku','SKU','model','modelo','Modelo'], ''));
+06-products.php.BAK.2025-09-21_233106:203:    $pidExisting = s06_find_product_id_by_sku($sku);
+06-products.php.BAK.2025-09-21_233106:206:    $termId = s06_first($row, ['term_id','category_term_id','termId','term'], null);
+06-products.php.BAK.2025-09-21_233106:208:        $out['reason'] = 'no_term_mapping_for_new_product';
+06-products.php.BAK.2025-09-21_233106:212:    $name   = s06_build_name($row);
+06-products.php.BAK.2025-09-21_233106:213:    $long   = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.BAK.2025-09-21_233106:214:    $short  = s06_clip(s06_first($row, ['short_description','short','Resumen','resumen'], $long));
+06-products.php.BAK.2025-09-21_233106:237:        'post_type'   => 'product',
+06-products.php.BAK.2025-09-21_233106:249:    // Set SKU & basic product type
+06-products.php.BAK.2025-09-21_233106:251:    wp_set_object_terms($pid, 'simple', 'product_type');
+06-products.php.BAK.2025-09-21_233106:260:if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+06-products.php.BAK.2025-09-21_233106:273:    $sku = trim((string) s06_first($row, ['sku','SKU','model','modelo','Modelo'], ''));
+06-products.php.BAK.2025-09-21_233106:274:    $report = ['sku' => $sku, 'product_id' => '', 'action' => '', 'reason' => ''];
+06-products.php.BAK.2025-09-21_233106:276:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $report);
+06-products.php.BAK.2025-09-21_233106:280:        s06_log("SKIP sku=$sku reason=" . ($report['reason'] ?: 'unknown'));
+06-products.php.BAK.2025-09-21_233106:286:        s06_apply_inventory_and_weight($pid, $row, $DRY);
+06-products.php.BAK.2025-09-21_233106:289:        s06_upsert_compu_product($sku, $row, $pid, $DRY);
+06-products.php.BAK.2025-09-21_233106:291:        $report['product_id'] = (string) $pid;
+06-products.php.BAK.2025-09-21_233106:294:            s06_log("UPDATED sku=$sku pid=$pid");
+06-products.php.BAK.2025-09-21_233106:297:            s06_log("IMPORTED sku=$sku pid=$pid");
+06-products.php.BAK.2025-09-21_233106:303:        s06_log("DRY-IMPORTED (simulated) sku=$sku");
+06-products.php.BAK.2025-09-21_233106:315:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-21_233106:319:    'stage'     => '06-products-minimal',
+10-publish.php.bak.2025-09-23_201032:6:if (!function_exists('wc_get_products')) { fwrite(STDERR,"[10] WooCommerce no cargado\n"); return; }
+10-publish.php.bak.2025-09-23_201032:14:$ids = wc_get_products($args);
+10-publish.php.bak.2025-09-23_201032:17:  $p=wc_get_product($pid); if(!$p)continue;
+10-publish.php.bak.2025-09-23_205112:7:if (!function_exists('wc_get_products')) { fwrite(STDERR,"[10] WooCommerce no cargado\n"); return; }
+10-publish.php.bak.2025-09-23_205112:15:$ids = wc_get_products($args);
+10-publish.php.bak.2025-09-23_205112:18:  $p=wc_get_product($pid); if(!$p)continue;
+09-pricing.php.bak.2025-09-23_205112:15:if (!function_exists('wc_get_product_id_by_sku')) { SLOG09("WooCommerce no cargado; abortando stage 09"); return; }
+09-pricing.php.bak.2025-09-23_205112:45:  $pid=wc_get_product_id_by_sku($sku); if(!$pid){fputcsv($csve,[$sku,"product_not_found"]);$err++;continue;}
+09-pricing.php.bak.2025-09-23_205112:46:  $p=wc_get_product($pid); if(!$p){fputcsv($csve,[$sku,"wc_get_product_failed"]);$err++;continue;}
+03-validate.php:4:class Compu_Stage_Validate {
+03-validate.php:12:    $out  = $dir . '/validated.jsonl';
+03-validate.php:22:        compu_import_log($run_id,'validate','error','Fila inválida: '.implode('; ', $errors), $r, isset($r['row_key'])?$r['row_key']:null);
+03-validate.php:28:    compu_import_log($run_id,'validate','info','Validación completa', ['ok'=>$ok,'err'=>$err]);
+07-media.php:31:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+07-media.php:33:if (empty($rows)) { SLOG07("No hay datos en resolved/validated"); return; }
+07-media.php:35:if (!function_exists('wc_get_product_id_by_sku')) { SLOG07("WooCommerce no cargado; abortando stage 07"); return; }
+07-media.php:51:  $pid = wc_get_product_id_by_sku($sku);
+07-media.php:52:  if(!$pid) { fputcsv($er,[$sku,$url,"product_not_found"]); $fail++; continue; }
+11-report.php.bak:7: * No modifica productos ni tablas de ofertas/precios.
+08-offers.php.bak.2025-09-23_201032:16:$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+08-offers.php.bak.2025-09-23_201032:27:  $pid = (function_exists('wc_get_product_id_by_sku')?wc_get_product_id_by_sku($sku):0); if(!$pid){/*permitimos upsert sin PID*/}
+06-products.php.BAK.2025-10-01-035515:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-035515:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-035515:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-035515:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-035515:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-035515:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-035515:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-035515:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-035515:126:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-035515:163:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-30-205826:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-09-30-205826:28:function s06_log($msg) {
+06-products.php.BAK.2025-09-30-205826:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-09-30-205826:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-30-205826:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-09-30-205826:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-09-30-205826:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-09-30-205826:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-09-30-205826:143:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+06-products.php.BAK.2025-09-22_001855:3: * Stage 06 - products (safe writer)
+06-products.php.BAK.2025-09-22_001855:27:function s06_log($msg) {
+06-products.php.BAK.2025-09-22_001855:34:    s06_log("FATAL_SHUTDOWN type={$e['type']} msg={$e['message']} file={$e['file']} line={$e['line']}");
+06-products.php.BAK.2025-09-22_001855:43:s06_log("START RUN_ID=$runId RUN_DIR=$runDir DRY_RUN=$dryRun LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-09-22_001855:48:  if (is_readable($wpLoad)) { require_once $wpLoad; s06_log("WP bootstrap OK ($wpLoad)"); }
+06-products.php.BAK.2025-09-22_001855:49:  else { s06_log("WP bootstrap SKIPPED (no legible: $wpLoad)"); }
+06-products.php.BAK.2025-09-22_001855:53:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-09-22_001855:57:if (!$csvImported || !$csvUpdated || !$csvSkipped) { s06_log("FATAL_CSV_OPEN finalDir=$finalDir"); ob_end_clean(); exit(1); }
+06-products.php.BAK.2025-09-22_001855:62:s06_log("OPENED_CSV imported,updated,skipped");
+06-products.php.BAK.2025-09-22_001855:65:if (!is_readable($inJsonl)) { s06_log("FATAL_INPUT_NOT_READABLE $inJsonl"); fclose($csvImported); fclose($csvUpdated); fclose($csvSkipped); ob_end_clean(); exit(2); }
+06-products.php.BAK.2025-09-22_001855:67:if (!$fh) { s06_log("FATAL_INPUT_OPEN $inJsonl"); fclose($csvImported); fclose($csvUpdated); fclose($csvSkipped); ob_end_clean(); exit(3); }
+06-products.php.BAK.2025-09-22_001855:105:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+06-products.php.bak:3: * Stage 06 — Products (minimal scope)
+06-products.php.bak:6: *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+06-products.php.bak:7: *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+06-products.php.bak:8: *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+06-products.php.bak:10: *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+06-products.php.bak:26: *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+06-products.php.bak:30: *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+06-products.php.bak:69:function s06_log(string $msg) {
+06-products.php.bak:76:s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+06-products.php.bak:80:$inValidated = $RUN_DIR . '/validated.jsonl';
+06-products.php.bak:81:$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+06-products.php.bak:83:    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+06-products.php.bak:91:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.bak:97:function s06_first(array $row, array $keys, $default=null) {
+06-products.php.bak:106:function s06_build_name(array $row): string {
+06-products.php.bak:107:    $brand = trim((string) s06_first($row, ['brand','marca','Marca'], ''));
+06-products.php.bak:108:    $model = trim((string) s06_first($row, ['model','modelo','Modelo','sku','SKU'], ''));
+06-products.php.bak:109:    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+06-products.php.bak:112:    return $name !== '' ? $name : ($model ?: $title ?: 'Producto sin nombre');
+06-products.php.bak:115:function s06_clip(?string $text, int $len=240): string {
+06-products.php.bak:122:/** Insert or update row in wp_compu_products (minimal fields) */
+06-products.php.bak:123:function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+06-products.php.bak:125:    $table = $wpdb->prefix . 'compu_products';
+06-products.php.bak:126:    $name  = s06_build_name($row);
+06-products.php.bak:127:    $short = s06_clip(s06_first($row, ['short_description','short','Resumen','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+06-products.php.bak:128:    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.bak:129:    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+06-products.php.bak:133:        'wp_post_id'        => $product_id,
+06-products.php.bak:141:    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+06-products.php.bak:154:function s06_apply_inventory_and_weight(int $product_id, array $row, int $DRY): void {
+06-products.php.bak:155:    $stock  = (int) s06_first($row, ['stock','existencias','Existencias'], 0);
+06-products.php.bak:156:    $weight = s06_first($row, ['weight','peso_kg','Peso Kg'], null);
+06-products.php.bak:159:        update_post_meta($product_id, '_manage_stock', 'yes');
+06-products.php.bak:160:        update_post_meta($product_id, '_stock', max(0, $stock));
+06-products.php.bak:161:        update_post_meta($product_id, '_stock_status', $stock > 0 ? 'instock' : 'outofstock');
+06-products.php.bak:163:            update_post_meta($product_id, '_weight', (string) $weight);
+06-products.php.bak:168:/** Find product by SKU */
+06-products.php.bak:169:function s06_find_product_id_by_sku(string $sku): int {
+06-products.php.bak:170:    if (function_exists('wc_get_product_id_by_sku')) {
+06-products.php.bak:171:        $pid = (int) wc_get_product_id_by_sku($sku);
+06-products.php.bak:182:/** Create or update the Woo product shell */
+06-products.php.bak:183:function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+06-products.php.bak:184:    $sku = trim((string) s06_first($row, ['sku','SKU','model','modelo','Modelo'], ''));
+06-products.php.bak:187:    $pidExisting = s06_find_product_id_by_sku($sku);
+06-products.php.bak:190:    $termId = s06_first($row, ['term_id','category_term_id','termId','term'], null);
+06-products.php.bak:192:        $out['reason'] = 'no_term_mapping_for_new_product';
+06-products.php.bak:196:    $name   = s06_build_name($row);
+06-products.php.bak:197:    $long   = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+06-products.php.bak:198:    $short  = s06_clip(s06_first($row, ['short_description','short','Resumen','resumen'], $long));
+06-products.php.bak:221:        'post_type'   => 'product',
+06-products.php.bak:233:    // Set SKU & basic product type
+06-products.php.bak:235:    wp_set_object_terms($pid, 'simple', 'product_type');
+06-products.php.bak:244:if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+06-products.php.bak:257:    $sku = trim((string) s06_first($row, ['sku','SKU','model','modelo','Modelo'], ''));
+06-products.php.bak:258:    $report = ['sku' => $sku, 'product_id' => '', 'action' => '', 'reason' => ''];
+06-products.php.bak:260:    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $report);
+06-products.php.bak:264:        s06_log("SKIP sku=$sku reason=" . ($report['reason'] ?: 'unknown'));
+06-products.php.bak:270:        s06_apply_inventory_and_weight($pid, $row, $DRY);
+06-products.php.bak:273:        s06_upsert_compu_product($sku, $row, $pid, $DRY);
+06-products.php.bak:275:        $report['product_id'] = (string) $pid;
+06-products.php.bak:278:            s06_log("UPDATED sku=$sku pid=$pid");
+06-products.php.bak:281:            s06_log("IMPORTED sku=$sku pid=$pid");
+06-products.php.bak:287:        s06_log("DRY-IMPORTED (simulated) sku=$sku");
+06-products.php.bak:297:s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+06-products.php.bak:301:    'stage'     => '06-products-minimal',
+final/skipped.csv:1:sku,product_id,action,reason
+final/updated.csv:1:sku,product_id,action,reason
+final/imported.csv:1:sku,product_id,action,reason
+04-resolve-map.php.BAK.2025-09-30-205826:9:    $src  = $dir . '/validated.jsonl';
+04-resolve-map.php.BAK.2025-09-30-205826:10:    if (!file_exists($src)) \WP_CLI::error('Falta validated.jsonl; corre validate.');
+05-terms.php.bak.2025-09-23_200425:32:    $in_validated = $run_dir . '/validated.jsonl';
+05-terms.php.bak.2025-09-23_200425:35:    $input_file = file_exists($in_resolved) ? $in_resolved : (file_exists($in_validated) ? $in_validated : '');
+05-terms.php.bak.2025-09-23_200425:37:      error_log("[05-terms] ERROR: No existe ni resolved.jsonl ni validated.jsonl en {$run_dir}");
+05-terms.php.bak.2025-09-23_200425:101:        // Sin mapeo: 06 lo marcará como skipped (no_term_mapping_for_new_product)
+08-offers.php.bak.20250921_002507:16:    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+08-offers.php.bak.20250921_002507:41:      // Mapeo: si viene "unmapped" o sin lvl3_id, podemos saltar (cuando el archivo es validated.jsonl puede no traer mapeo)
+08-offers.php.bak.20250921_002507:46:      if (function_exists('wc_get_product_id_by_sku')) { $post_id = intval(wc_get_product_id_by_sku($sku)); }
+08-offers.php.bak.20250921_002507:47:      if (!$post_id && function_exists('compu_import_find_product_id_by_sku')) { $post_id = intval(compu_import_find_product_id_by_sku($sku)); }
+08-offers.php.bak.20250921_002507:51:      if (!$post_id) { $skipped_mode++; continue; } // por simplicidad, solo upsert a productos existentes
+04-resolve-map.php:9:    $src  = $dir . '/validated.jsonl';
+04-resolve-map.php:10:    if (!file_exists($src)) \WP_CLI::error('Falta validated.jsonl; corre validate.');
+06-products.php.BAK.2025-10-01-022548:3: * Stage 06 - products (stable writer)
+06-products.php.BAK.2025-10-01-022548:28:function s06_log($msg) {
+06-products.php.BAK.2025-10-01-022548:54:s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+06-products.php.BAK.2025-10-01-022548:57:$csvHeader   = ['sku','product_id','action','reason'];
+06-products.php.BAK.2025-10-01-022548:63:  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
+06-products.php.BAK.2025-10-01-022548:75:s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
+06-products.php.BAK.2025-10-01-022548:79:  s06_log("FATAL input no legible: $inJsonl");
+06-products.php.BAK.2025-10-01-022548:86:  s06_log("FATAL no se pudo abrir $inJsonl");
+06-products.php.BAK.2025-10-01-022548:126:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
+06-products.php.BAK.2025-10-01-022548:163:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
