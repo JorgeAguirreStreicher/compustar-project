@@ -1,238 +1,166 @@
 <?php
-require_once dirname(__DIR__) . "/compu-guards.php";
-/* CCX test: parche aplicado OK */
-/**
- * Stage 06 - products (stable writer)
- * - Escribe final/*.csv siempre.
- * - No modifica la BD (solo simula acciones).
- * - No carga WordPress ni depende de plugins/temas.
- * - Solo corre en CLI / WP-CLI; si se incluye desde web, retorna inmediatamente.
- */
+require_once dirname(__DIR__) . '/helpers/helpers-common.php';
 
-// Solo ejecuta en CLI o WP-CLI; si entra por web (FPM/Apache) no corre.
+/**
+ * Stage 06 - Products (stable writer, modo simulación)
+ *
+ * Consume los JSONL normalizados/resueltos, valida el diccionario canónico
+ * y produce CSVs de importación simulada. Acepta los nombres nuevos y mantiene
+ * compatibilidad con alias heredados.
+ */
 if (!(PHP_SAPI === 'cli' || (defined('WP_CLI') && WP_CLI))) {
   return;
 }
 
-// Aísla cualquier salida accidental (por seguridad)
-if (!ob_get_level()) { ob_start(); }
+$RUN_ID  = getenv('RUN_ID') ?: 'unknown';
+$RUN_DIR = rtrim((string) getenv('RUN_DIR'), '/');
+$LIMIT   = getenv('LIMIT') !== false ? (int) getenv('LIMIT') : null;
+$OFFSET  = getenv('OFFSET') !== false ? (int) getenv('OFFSET') : 0;
 
-date_default_timezone_set('UTC');
+if ($RUN_DIR === '') {
+  fwrite(STDERR, "[stage06] Falta RUN_DIR\n");
+  return;
+}
 
-// === Entradas por entorno ===
-$runId    = getenv('RUN_ID') ?: 'unknown';
-$runDir   = getenv('RUN_DIR') ?: '';
-$limit    = (int) (getenv('LIMIT') ?: 0);
-$offset   = (int) (getenv('OFFSET') ?: 0);
-$inJsonl  = getenv('INPUT_JSONL');
+$logDir = $RUN_DIR.'/logs';
+$finalDir = $RUN_DIR.'/final';
+@mkdir($logDir, 0775, true);
+@mkdir($finalDir, 0775, true);
+$logFile = $logDir.'/stage06.log';
+$LOG = fopen($logFile, 'a');
 
-// === Logger robusto a archivo (sin volcar a error_log para no ensuciar WP-CLI) ===
-function s06_log($msg) {
-  global $runDir;
+function s06_log(string $msg): void {
+  global $LOG;
   $line = '['.date('Y-m-d H:i:s')."] stage06: $msg\n";
-  if ($runDir) {
-    $logDir = rtrim($runDir, '/').'/logs';
-    if (!is_dir($logDir)) { @mkdir($logDir, 0775, true); }
-    $logf = $logDir.'/stage06.log';
-    @file_put_contents($logf, $line, FILE_APPEND | LOCK_EX);
-  }
+  if ($LOG) { fwrite($LOG, $line); }
 }
 
-// === Normalización de rutas de trabajo ===
-if (!$runDir) {
-  // fallback a la carpeta actual (no ideal, pero evita fatales)
-  $runDir = __DIR__;
-}
-if (!$inJsonl) {
-  $inJsonl = $runDir.'/resolved.jsonl';
-}
+s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR LIMIT=".($LIMIT ?? 'none')." OFFSET=$OFFSET");
 
-$finalDir = $runDir.'/final';
-if (!is_dir($finalDir)) {
-  @mkdir($finalDir, 0775, true);
-  @chmod($finalDir, 02775); // SGID para heredar grupo
+$inResolved  = $RUN_DIR.'/resolved.jsonl';
+$inValidated = $RUN_DIR.'/validated.jsonl';
+$inputFile   = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+if (!$inputFile) {
+  s06_log('ERROR: No se encontró resolved.jsonl ni validated.jsonl');
+  return;
 }
 
-s06_log("START RUN_ID=$runId RUN_DIR=$runDir LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
-
-// === Abrir CSVs de salida (cabeceras incluidas). fputcsv con 5 args (PHP>=8.4-safe)
 $csvHeader   = ['sku','product_id','action','reason'];
-$csvImported = @fopen($finalDir.'/imported.csv', 'w');
-$csvUpdated  = @fopen($finalDir.'/updated.csv',  'w');
-$csvSkipped  = @fopen($finalDir.'/skipped.csv',  'w');
-
-if (!$csvImported || !$csvUpdated || !$csvSkipped) {
-  s06_log("FATAL no se pudieron abrir CSVs en $finalDir");
-  if ($csvImported) fclose($csvImported);
-  if ($csvUpdated)  fclose($csvUpdated);
-  if ($csvSkipped)  fclose($csvSkipped);
-  if (ob_get_level()) { ob_end_clean(); }
-  exit(1);
+$csvImported = fopen($finalDir.'/imported.csv', 'w');
+$csvUpdated  = fopen($finalDir.'/updated.csv',  'w');
+$csvSkipped  = fopen($finalDir.'/skipped.csv',  'w');
+foreach ([$csvImported,$csvUpdated,$csvSkipped] as $fh) {
+  fputcsv($fh, $csvHeader, ',', '"', '\\');
 }
 
-fputcsv($csvImported, $csvHeader, ",", "\"", "\\");
-fputcsv($csvUpdated,  $csvHeader, ",", "\"", "\\");
-fputcsv($csvSkipped,  $csvHeader, ",", "\"", "\\");
-fflush($csvImported); fflush($csvUpdated); fflush($csvSkipped);
-s06_log("OPENED_CSV final/imported.csv, updated.csv, skipped.csv");
-
-// === Validar/abrir input ===
-if (!is_readable($inJsonl)) {
-  s06_log("FATAL input no legible: $inJsonl");
-  fclose($csvImported); fclose($csvUpdated); fclose($csvSkipped);
-  if (ob_get_level()) { ob_end_clean(); }
-  exit(2);
-}
-$fh = @fopen($inJsonl, 'r');
+$fh = fopen($inputFile, 'r');
 if (!$fh) {
-  s06_log("FATAL no se pudo abrir $inJsonl");
+  s06_log("ERROR: No se pudo abrir $inputFile");
   fclose($csvImported); fclose($csvUpdated); fclose($csvSkipped);
-  if (ob_get_level()) { ob_end_clean(); }
-  exit(3);
+  return;
 }
 
-// === Procesamiento (solo decide imported/updated/skipped sin tocar BD) ===
-$lineNo = 0; $processed = 0; $imported = 0; $updated = 0; $skipped = 0;
-
+$processed=0; $imported=0; $updated=0; $skipped=0; $lineNo=0;
 while (!feof($fh)) {
   $line = fgets($fh);
-  if ($line === false) break;
+  if ($line === false) { break; }
   $lineNo++;
-  if ($offset && $lineNo <= $offset) continue;
-
+  if ($OFFSET && $lineNo <= $OFFSET) { continue; }
   $row = json_decode($line, true);
   if (!is_array($row)) {
     $skipped++;
-    fputcsv($csvSkipped, ["", "", "skipped", "invalid_json"], ",", "\"", "\\");
+    fputcsv($csvSkipped, ['', '', 'skipped', 'invalid_json'], ',', '"', '\\');
     continue;
   }
 
-  // SKU por prioridad
-  $sku = "";
-  foreach (['sku','model','codigo','code'] as $k) {
-    if (!empty($row[$k])) { $sku = trim((string)$row[$k]); break; }
-  }
-  if ($sku === "") {
+  $sku = s06_first($row, ['sku','supplier_sku','model','codigo','code']);
+  if ($sku === null || $sku === '') {
     $skipped++;
-    fputcsv($csvSkipped, ["", "", "skipped", "missing_sku"], ",", "\"", "\\");
-// [STAGE06 PATCH v2] Filters añadidos: blocked_lvl1, zero_stock_all
-
-// A) blocked_lvl1: si lvl1 vacío / '---' / '25'  → skip
-$lvl1 = '';
-foreach (['lvl1_id','id_n1','id_menu_nvl_1','ID Menu Nvl 1','lvl1','n1_id'] as $k) {
-    if (isset($row[$k]) && trim((string)$row[$k]) !== '') { $lvl1 = trim((string)$row[$k]); break; }
-}
-if ($lvl1 === '' || $lvl1 === '---' || $lvl1 === '25') {
-    $skipped++;
-    fputcsv($csvSkipped, [$sku, "", "skipped", "blocked_lvl1"], ",", "\"", "\\");
-    continue;
-}
-
-// B) zero_stock_all: si la suma de todos los stocks es 0 → skip
-$__stocks = [];
-foreach (['stock','stock_a15','stock_a15_tj'] as $k) {
-    if (isset($row[$k]) && $row[$k] !== '') { $__stocks[] = $row[$k]; }
-}
-if (!empty($row['stock_by_wh']) && is_array($row['stock_by_wh'])) {
-    $__stocks = array_merge($__stocks, $row['stock_by_wh']);
-}
-if (!empty($row['stocks_by_branch']) && is_array($row['stocks_by_branch'])) {
-    $__stocks = array_merge($__stocks, $row['stocks_by_branch']);
-}
-// sumar tolerantemente (strings con unidades, etc.)
-$__total = 0.0;
-foreach ($__stocks as $__v) {
-    $__n = (float)preg_replace('/[^\d\.\-]/','', (string)$__v);
-    $__total += $__n;
-}
-if ($__total <= 0) {
-    $skipped++;
-    fputcsv($csvSkipped, [$sku, "", "skipped", "zero_stock_all"], ",", "\"", "\\");
-    continue;
-}
+    fputcsv($csvSkipped, ['', '', 'skipped', 'missing_sku'], ',', '"', '\\');
     continue;
   }
 
-// [STAGE06 PATCH v2] Filters añadidos: blocked_lvl1, zero_stock_all
-
-// DEDUP_COMMENTED // A) blocked_lvl1: si lvl1 vacío / '---' / '25'  → skip
-// DEDUP_COMMENTED $lvl1 = '';
-// DEDUP_COMMENTED foreach (['lvl1_id','id_n1','id_menu_nvl_1','ID Menu Nvl 1','lvl1','n1_id'] as $k) {
-// DEDUP_COMMENTED     if (isset($row[$k]) && trim((string)$row[$k]) !== '') { $lvl1 = trim((string)$row[$k]); break; }
-// DEDUP_COMMENTED }
-// DEDUP_COMMENTED if ($lvl1 === '' || $lvl1 === '---' || $lvl1 === '25') {
-// DEDUP_COMMENTED     $skipped++;
-// DEDUP_COMMENTED     fputcsv($csvSkipped, [$sku, "", "skipped", "blocked_lvl1"], ",", "\"", "\\");
-// DEDUP_COMMENTED     continue;
-// DEDUP_COMMENTED }
-
-// B) zero_stock_all: si la suma de todos los stocks es 0 → skip
-$__stocks = [];
-foreach (['stock','stock_a15','stock_a15_tj'] as $k) {
-    if (isset($row[$k]) && $row[$k] !== '') { $__stocks[] = $row[$k]; }
-}
-if (!empty($row['stock_by_wh']) && is_array($row['stock_by_wh'])) {
-    $__stocks = array_merge($__stocks, $row['stock_by_wh']);
-}
-if (!empty($row['stocks_by_branch']) && is_array($row['stocks_by_branch'])) {
-    $__stocks = array_merge($__stocks, $row['stocks_by_branch']);
-}
-// sumar tolerantemente (strings con unidades, etc.)
-$__total = 0.0;
-foreach ($__stocks as $__v) {
-    $__n = (float)preg_replace('/[^\d\.\-]/','', (string)$__v);
-    $__total += $__n;
-}
-if ($__total <= 0) {
+  $lvl1 = s06_first($row, ['lvl1_id','id_n1','id_menu_nvl_1','lvl1','n1_id']);
+  if ($lvl1 === null || $lvl1 === '' || $lvl1 === '---' || $lvl1 === '25') {
     $skipped++;
-    fputcsv($csvSkipped, [$sku, "", "skipped", "zero_stock_all"], ",", "\"", "\\");
+    fputcsv($csvSkipped, [$sku, '', 'skipped', 'blocked_lvl1'], ',', '"', '\\');
     continue;
-}
-  // === Autofill de brand/title para evitar missing_title_brand ===
-  if (!isset($row["brand"]) || trim((string)$row["brand"]) === "") {
-      foreach (["brand","marca","fabricante","manufacturer","proveedor","vendor"] as $k) {
-          if (isset($row[$k]) && trim((string)$row[$k]) !== "") { $row["brand"] = trim((string)$row[$k]); break; }
-      }
-  }
-  if (!isset($row["title"]) || trim((string)$row["title"]) === "") {
-      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
-          if (isset($row[$k]) && trim((string)$row[$k]) !== "") { $row["title"] = trim((string)$row[$k]); break; }
-      }
-      if (!isset($row["title"]) || trim((string)$row["title"]) === "") {
-          $b = isset($row["brand"]) ? trim((string)$row["brand"]) : "";
-          $m = isset($row["sku"])   ? trim((string)$row["sku"])   : "";
-          if ($b !== "" && $m !== "") { $row["title"] = $b . " " . $m; }
-          elseif ($m !== "")         { $row["title"] = $m; }
-          elseif ($b !== "")         { $row["title"] = $b; }
-      }
   }
 
+  $stockTotal = s06_stock_total($row);
+  if ($stockTotal <= 0) {
+    $skipped++;
+    fputcsv($csvSkipped, [$sku, '', 'skipped', 'zero_stock_all'], ',', '"', '\\');
+    continue;
+  }
 
-  $hasTitle = !empty($row['title']);
-  $hasBrand = !empty($row['brand']);
+  $brand = s06_first($row, ['brand','marca']);
+  $title = s06_first($row, ['title','titulo','name','nombre']);
+  if ($title === null || $title === '') {
+    $title = trim(($brand ?? '').' '.$sku);
+  }
 
-  if ($hasTitle && $hasBrand) {
+  if ($brand && $title) {
     $imported++;
-    fputcsv($csvImported, [$sku, "", "imported", "safe-simulated"], ",", "\"", "\\");
-  } elseif ($hasTitle && !$hasBrand) {
+    fputcsv($csvImported, [$sku, '', 'imported', 'simulated'], ',', '"', '\\');
+  } elseif ($title) {
     $updated++;
-    fputcsv($csvUpdated,  [$sku, "", "updated", "missing_brand_simulated"], ",", "\"", "\\");
+    fputcsv($csvUpdated, [$sku, '', 'updated', 'missing_brand'], ',', '"', '\\');
   } else {
     $skipped++;
-    fputcsv($csvSkipped,  [$sku, "", "skipped", "missing_title_brand"], ",", "\"", "\\");
+    fputcsv($csvSkipped, [$sku, '', 'skipped', 'missing_title'], ',', '"', '\\');
+    continue;
   }
 
   $processed++;
-  if ($limit && $processed >= $limit) break;
+  if ($LIMIT !== null && $processed >= $LIMIT) { break; }
 }
-fclose($fh);
 
-// === Cierre CSVs y log final ===
+fclose($fh);
 fflush($csvImported); fclose($csvImported);
 fflush($csvUpdated);  fclose($csvUpdated);
 fflush($csvSkipped);  fclose($csvSkipped);
 
 s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
 
-// Descarta cualquier salida accidental que haya quedado
-if (ob_get_level()) { ob_end_clean(); }
+if ($LOG) { fclose($LOG); }
+
+/**
+ * Helpers
+ * ------------------------------------------------------------------------
+ */
+function s06_first(array $row, array $keys): ?string {
+  foreach ($keys as $key) {
+    if (array_key_exists($key, $row) && trim((string)$row[$key]) !== '') {
+      return trim((string)$row[$key]);
+    }
+  }
+  return null;
+}
+
+function s06_stock_total(array $row): int {
+  $candidates = [
+    'stock_total','stock','existencias','inventario','stock_a15','stock_main','stock_others'
+  ];
+  $numbers = [];
+  foreach ($candidates as $key) {
+    if (isset($row[$key]) && $row[$key] !== '') {
+      $numbers[] = (float) preg_replace('/[^0-9\.-]/','', (string)$row[$key]);
+    }
+  }
+  if (isset($row['stock_by_branch']) && is_array($row['stock_by_branch'])) {
+    foreach ($row['stock_by_branch'] as $qty) {
+      $numbers[] = (float) $qty;
+    }
+  }
+  if (isset($row['stocks_by_branch']) && is_array($row['stocks_by_branch'])) {
+    foreach ($row['stocks_by_branch'] as $qty) {
+      $numbers[] = (float) $qty;
+    }
+  }
+  $total = 0.0;
+  foreach ($numbers as $value) {
+    $total += max(0.0, (float)$value);
+  }
+  return (int) round($total);
+}
