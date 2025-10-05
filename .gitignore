@@ -19,3 +19,4 @@ vendor/
 # Archivos grandes de SQL (si quieres excluir algunos)
 *.sql.zip
 *.bak
+data/ProductosHora.csv
