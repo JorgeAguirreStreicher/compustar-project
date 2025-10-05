@@ -11,6 +11,7 @@ Thumbs.db
 venv/
 .env
 __pycache__/
+tests/tmp/
 
 # Dependencias innecesarias
 node_modules/

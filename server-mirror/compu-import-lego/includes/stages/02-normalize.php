@@ -1,465 +1,347 @@
 <?php
-if (!defined('ABSPATH')) { exit; }
+if (!defined('ABSPATH')) {
+  exit;
+}
 
-require_once dirname(__DIR__) . '/helpers/helpers-common.php';
-require_once dirname(__DIR__) . '/helpers/helpers-db.php';
-
-/**
- * Stage 02 - NORMALIZE
- *
- * Lee el CSV crudo del run y construye un diccionario canónico por fila.
- * El diccionario mantiene alias temporales para compatibilidad mientras
- * el resto del pipeline migra a los nuevos nombres (`cost_usd`,
- * `exchange_rate`, `stock_total`, etc.).
- */
 class Compu_Stage_Normalize {
-  /** @var array<string,array<int,string>> */
-  private $headerSynonyms = [];
-  /** @var array<string,array<int,string>> */
-  private $branchSynonyms = [];
-
-  public function __construct(){
-    $this->bootstrapSynonyms();
-  }
-
   /**
-   * Punto de entrada desde WP-CLI (`wp compu stage normalize`).
+   * Ejecuta la normalización del CSV dentro del RUN_DIR.
+   *
    * @param array<string,mixed> $args
    */
-  public function run($args){
-    $run_id = compu_import_run_id_from_arg($args['run-id'] ?? 'last');
-    $base   = compu_import_get_base_dir();
-    $dir    = trailingslashit($base).'run-'.$run_id;
-    $src    = $dir.'/source.csv';
-    $srcEnv = getenv('CSV_SRC');
-    if ($srcEnv && file_exists($srcEnv)) { $src = $srcEnv; }
-    if (!file_exists($src)) { \WP_CLI::error('Falta source.csv; ejecuta fetch antes de normalize.'); }
+  public function run($args) {
+    $runDir   = $this->resolveRunDirectory($args);
+    $source   = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'source.csv';
+    $jsonPath = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'normalized.jsonl';
+    $csvPath  = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'normalized.csv';
 
-    $normalized = $dir.'/normalized.jsonl';
-    $headerMap  = $dir.'/header-map.json';
-    $dupesCsv   = $dir.'/duplicates.csv';
-    @unlink($normalized);
-    @unlink($headerMap);
-    @unlink($dupesCsv);
-    touch($normalized);
-
-    $fh = fopen($src, 'r');
-    if (!$fh) { \WP_CLI::error('No se pudo abrir source.csv para lectura'); }
-
-    $delimiter   = $this->detect_delimiter($src);
-    $header_raw  = fgetcsv($fh, 0, $delimiter, '"', '\\');
-    if ($header_raw === false) {
-      fclose($fh);
-      \WP_CLI::error('El CSV no tiene cabecera legible.');
+    if (!is_file($source)) {
+      $this->cli_error("Falta source.csv en {$runDir}. Ejecuta fetch primero.");
     }
 
-    $header_norm = array_map(function($h){ return $this->norm_header($h); }, $header_raw);
-    $columnIndex = $this->build_column_index($header_norm);
-    $branchIndex = $this->build_branch_index($header_norm);
+    $delimiter = $this->detectDelimiter($source);
+    $handle    = fopen($source, 'r');
+    if ($handle === false) {
+      $this->cli_error('No se pudo abrir source.csv para lectura.');
+    }
 
-    $hdr_meta = [
-      'header'            => $header_raw,
-      'normalized'        => $header_norm,
-      'column_index'      => $columnIndex,
-      'branch_index'      => $branchIndex,
-      'detected_delimiter'=> $delimiter,
-    ];
-    file_put_contents(
-      $headerMap,
-      wp_json_encode($hdr_meta, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)
-    );
+    $headerRaw = fgetcsv($handle, 0, $delimiter, '"', '\\');
+    if ($headerRaw === false) {
+      fclose($handle);
+      $this->cli_error('El CSV no contiene encabezados.');
+    }
 
-    $exclusions_csv = '/home/compustar/syscom_l1_exclusions.csv';
-    $exclude_l1     = $this->load_l1_exclusions($exclusions_csv);
+    $headerMeta     = $this->buildHeaderMeta($headerRaw);
+    $modeloIndex    = $this->findModeloIndex($headerMeta);
+    $headerMeta     = $this->ensureSkuColumn($headerMeta, $modeloIndex);
+    $normalizedHead = $this->finalizeHeaderNames($headerMeta);
 
-    $seenSkus   = [];
-    $dupes      = [];
-    $written    = 0;
-    $skippedSku = 0;
+    $jsonHandle = fopen($jsonPath, 'w');
+    $csvHandle  = fopen($csvPath, 'w');
+    if ($jsonHandle === false || $csvHandle === false) {
+      if ($handle !== false) {
+        fclose($handle);
+      }
+      if ($jsonHandle !== false) {
+        fclose($jsonHandle);
+      }
+      if ($csvHandle !== false) {
+        fclose($csvHandle);
+      }
+      $this->cli_error('No se pudieron crear los archivos de salida.');
+    }
 
-    while (($row = fgetcsv($fh, 0, $delimiter, '"', '\\')) !== false) {
-      $canon = $this->build_canonical_row($row, $columnIndex, $branchIndex);
-      if ($canon === null) {
-        $skippedSku++;
-        compu_import_log($run_id,'normalize','error','Fila omitida: sin SKU detectable');
+    fputcsv($csvHandle, $normalizedHead);
+
+    while (($row = fgetcsv($handle, 0, $delimiter, '"', '\\')) !== false) {
+      if ($this->isEmptyRow($row)) {
         continue;
       }
 
-      // Exclusión por L1 si aplica
-      $lvl1_id = $canon['lvl1_id'] ?? null;
-      if ($lvl1_id && isset($exclude_l1[$lvl1_id])) {
-        compu_import_log($run_id, 'normalize', 'info', 'Fila excluida por L1', [
-          'lvl1_id' => $lvl1_id,
-          'sku'     => $canon['sku'],
-        ]);
-        continue;
+      $assoc = [];
+      $csvRow = [];
+      $modeloValue = $modeloIndex !== null ? $this->valueFromRow($row, $modeloIndex) : '';
+
+      foreach ($headerMeta as $position => $meta) {
+        $value = $this->valueFromRow($row, $meta['source_index']);
+
+        if ($meta['is_sku']) {
+          if ($value === '') {
+            $value = $modeloValue;
+          }
+        }
+
+        $assoc[$meta['normalized']] = $value;
+        $csvRow[$position] = $value;
       }
 
-      $key = mb_strtolower($canon['sku'], 'UTF-8');
-      if (isset($seenSkus[$key])) {
-        $dupes[$canon['sku']] = ($dupes[$canon['sku']] ?? 1) + 1;
-      }
-      $seenSkus[$key] = true;
-
-      compu_import_append_jsonl($normalized, $canon);
-      $written++;
-    }
-    fclose($fh);
-
-    if (!empty($dupes)) {
-      $fhDupes = fopen($dupesCsv, 'w');
-      fputcsv($fhDupes, ['sku','duplicate_count']);
-      foreach ($dupes as $sku => $count) {
-        fputcsv($fhDupes, [$sku, $count]);
-        compu_import_log($run_id,'normalize','warning','SKU duplicado detectado',[
-          'sku' => $sku,
-          'count' => $count,
-        ]);
-      }
-      fclose($fhDupes);
+      fwrite($jsonHandle, $this->encodeJsonLine($assoc));
+      fputcsv($csvHandle, $csvRow);
     }
 
-    compu_import_log($run_id,'normalize','info','Stage 02 completado',[
-      'rows_written'   => $written,
-      'skipped_no_sku' => $skippedSku,
-    ]);
-  }
-
-  private function bootstrapSynonyms(): void {
-    $aliasFile = dirname(__DIR__, 2).'/aliases.json';
-    $raw       = [];
-    if (file_exists($aliasFile)) {
-      $json = json_decode(file_get_contents($aliasFile), true);
-      if (is_array($json)) { $raw = $json; }
-    }
-
-    $map = [
-      'sku'             => ['sku','modelo','model','mpn','codigo','code','clave','product_code'],
-      'supplier_sku'    => ['supplier_sku','sku_proveedor'],
-      'brand'           => ['brand','marca'],
-      'model'           => ['model','modelo','mpn'],
-      'title'           => ['title','titulo','título','nombre','product_title'],
-      'description_html'=> ['description','descripcion','descripción','desc','detalle','html','content'],
-      'image_url'       => ['image_url','imagen','imagen_principal','image','img','picture','url_imagen'],
-      'cost_usd'        => ['cost_usd','su_precio','su precio','precio_usd','precio usd','precio','price_customer'],
-      'list_price_usd'  => ['list_price','price_list','precio_lista','lista'],
-      'special_price_usd'=> ['special_price','precio_especial'],
-      'exchange_rate'   => ['exchange_rate','tipo_cambio','tipo de cambio','tc','exchange'],
-      'weight_kg'       => ['weight_kg','peso','peso_kg','peso kg','weight'],
-      'tax_code'        => ['tax_code','codigo_fiscal','código fiscal','clave fiscal','cfdi'],
-      'lvl1'            => ['lvl1','menu_n1','menu 1','nivel 1','categoria','categoría'],
-      'lvl2'            => ['lvl2','menu_n2','menu 2','nivel 2','subcategoria','sub-categoria'],
-      'lvl3'            => ['lvl3','menu_n3','menu 3','nivel 3','subsubcategoria'],
-      'lvl1_id'         => ['lvl1_id','id_n1','id menu nvl 1','id_menu_nvl_1'],
-      'lvl2_id'         => ['lvl2_id','id_n2','id menu nvl 2','id_menu_nvl_2'],
-      'lvl3_id'         => ['lvl3_id','id_n3','id menu nvl 3','id_menu_nvl_3'],
-      'stock_total'     => ['stock_total','stock','existencias','existencia','inventario'],
-      'stock_tijuana'   => ['stock_tijuana','tijuana','stock tj'],
-      'stock_main'      => ['stock_main','stock_otros','stock_others','stock_a15'],
-    ];
-
-    foreach ($raw as $aliasKey => $variants) {
-      if (!is_array($variants)) { continue; }
-      $canonical = $this->mapAliasKeyToCanonical($aliasKey);
-      if (!$canonical) { continue; }
-      foreach ($variants as $variant) {
-        $map[$canonical][] = $variant;
-      }
-    }
-
-    foreach ($map as $canonical => $variants) {
-      $norm = [];
-      foreach ($variants as $variant) {
-        $v = $this->norm_header($variant);
-        if ($v !== '') { $norm[$v] = true; }
-      }
-      $this->headerSynonyms[$canonical] = array_keys($norm);
-    }
-
-    // Branch aliases (solo guardamos normalizados)
-    $branchMap = [];
-    foreach ($raw as $aliasKey => $variants) {
-      if (strpos($aliasKey, 'stock_') !== 0) { continue; }
-      if (!is_array($variants)) { continue; }
-      foreach ($variants as $variant) {
-        $branchMap[$aliasKey][] = $this->norm_header($variant);
-      }
-    }
-    $this->branchSynonyms = $branchMap;
-  }
-
-  private function mapAliasKeyToCanonical(string $aliasKey): ?string {
-    $map = [
-      'sku'           => 'sku',
-      'brand'         => 'brand',
-      'title'         => 'title',
-      'price_customer'=> 'cost_usd',
-      'price_list'    => 'list_price_usd',
-      'price_special' => 'special_price_usd',
-      'exchange_rate' => 'exchange_rate',
-      'weight_kg'     => 'weight_kg',
-      'tax_code'      => 'tax_code',
-      'description'   => 'description_html',
-      'image_url'     => 'image_url',
-      'cat_lvl1'      => 'lvl1',
-      'cat_lvl2'      => 'lvl2',
-      'cat_lvl3'      => 'lvl3',
-      'cat_id_lvl1'   => 'lvl1_id',
-      'cat_id_lvl2'   => 'lvl2_id',
-      'cat_id_lvl3'   => 'lvl3_id',
-    ];
-    return $map[$aliasKey] ?? null;
+    fclose($handle);
+    fclose($jsonHandle);
+    fclose($csvHandle);
   }
 
   /**
-   * @param array<int,string> $headerNorm
-   * @return array<string,array<int,int>> canonical => list of column indexes
+   * @param array<string,mixed> $args
    */
-  private function build_column_index(array $headerNorm): array {
-    $index = [];
-    foreach ($this->headerSynonyms as $canonical => $variants) {
-      foreach ($variants as $variant) {
-        foreach ($headerNorm as $i => $header) {
-          if ($header === $variant) {
-            $index[$canonical][] = $i;
-          }
-        }
+  private function resolveRunDirectory(array $args): string {
+    $candidates = [];
+    foreach (['run-dir', 'run_dir', 'runDir', 'dir', 'path'] as $key) {
+      if (!empty($args[$key])) {
+        $candidates[] = (string) $args[$key];
       }
     }
-    return $index;
-  }
-
-  /**
-   * @param array<int,string> $headerNorm
-   * @return array<string,int> branch alias => column index
-   */
-  private function build_branch_index(array $headerNorm): array {
-    $branchIndex = [];
-    foreach ($this->branchSynonyms as $aliasKey => $variants) {
-      foreach ($variants as $variant) {
-        foreach ($headerNorm as $i => $header) {
-          if ($header === $variant) {
-            $branchIndex[$aliasKey] = $i;
-          }
-        }
+    foreach (['RUN_DIR', 'RUN_PATH'] as $envKey) {
+      $envValue = getenv($envKey);
+      if ($envValue !== false && $envValue !== '') {
+        $candidates[] = (string) $envValue;
       }
     }
-    return $branchIndex;
+
+    foreach ($candidates as $candidate) {
+      $candidate = rtrim(trim($candidate), DIRECTORY_SEPARATOR);
+      if ($candidate !== '') {
+        return $candidate;
+      }
+    }
+
+    if (function_exists('compu_import_resolve_run_dir')) {
+      $resolved = compu_import_resolve_run_dir($args);
+      if ($resolved !== '') {
+        return $resolved;
+      }
+    }
+
+    $this->cli_error('No se indicó el RUN_DIR para Stage 02.');
+    return '';
   }
 
-  private function detect_delimiter(string $file): string {
-    $sample = file_get_contents($file, false, null, 0, 2048) ?: '';
-    $candidates = [',',';','\t','|'];
-    $best = ','; $bestCount = -1;
-    foreach ($candidates as $cand) {
-      $count = substr_count($sample, $cand);
-      if ($count > $bestCount) { $best = $cand; $bestCount = $count; }
+  private function detectDelimiter(string $file): string {
+    $sample = file_get_contents($file, false, null, 0, 4096);
+    if ($sample === false) {
+      return ',';
+    }
+    $candidates = [',', ';', "\t", '|'];
+    $best = ',';
+    $bestCount = -1;
+    foreach ($candidates as $candidate) {
+      $count = substr_count($sample, $candidate);
+      if ($count > $bestCount) {
+        $best = $candidate;
+        $bestCount = $count;
+      }
     }
     return $best;
   }
 
-  private function norm_header($header): string {
-    $h = (string)$header;
-    $h = preg_replace('/^\xEF\xBB\xBF/', '', $h); // BOM
-    if (preg_match('/M-CM-|Ã|Â/u', $h)) {
-      $try = @iconv('WINDOWS-1252', 'UTF-8//TRANSLIT//IGNORE', $h);
-      if ($try !== false) { $h = $try; }
-      $h = str_replace(['M-CM-','Â','Ã'], '', $h);
+  /**
+   * @param array<int,string> $headerRaw
+   * @return array<int,array{normalized:string,source_index:int,original:string,is_sku:bool}>
+   */
+  private function buildHeaderMeta(array $headerRaw): array {
+    $meta = [];
+    foreach ($headerRaw as $index => $label) {
+      $meta[] = [
+        'normalized'    => $this->normalizeHeader((string) $label),
+        'source_index'  => $index,
+        'original'      => (string) $label,
+        'is_sku'        => $this->isSkuLabel((string) $label),
+      ];
     }
-    if (class_exists('Transliterator')) {
-      $t = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC;');
-      if ($t) { $h = $t->transliterate($h); }
-    } else {
-      $h = iconv('UTF-8','ASCII//TRANSLIT//IGNORE',$h);
-    }
-    $h = mb_strtolower($h ?: '', 'UTF-8');
-    $h = preg_replace('/[^a-z0-9]+/u','_', $h);
-    $h = preg_replace('/_+/', '_', $h);
-    return trim($h, '_');
+    return $meta;
   }
 
   /**
-   * @param array<int,string> $row
-   * @param array<string,array<int,int>> $columnIndex
-   * @param array<string,int> $branchIndex
-   * @return array<string,mixed>|null
+   * @param array<int,array{normalized:string,source_index:int,original:string,is_sku:bool}> $meta
    */
-  private function build_canonical_row(array $row, array $columnIndex, array $branchIndex): ?array {
-    $sku = $this->first_non_empty($row, $columnIndex['sku'] ?? []);
-    if ($sku === null || $sku === '') {
-      $skuAlt = $this->first_non_empty($row, $columnIndex['model'] ?? []);
-      $sku = $skuAlt !== null ? $skuAlt : null;
-    }
-    if ($sku === null || $sku === '') {
-      return null;
-    }
-
-    $brand   = $this->first_non_empty($row, $columnIndex['brand'] ?? []);
-    $model   = $this->first_non_empty($row, $columnIndex['model'] ?? []);
-    $title   = $this->first_non_empty($row, $columnIndex['title'] ?? []);
-    $desc    = $this->first_non_empty($row, $columnIndex['description_html'] ?? []);
-    $image   = $this->first_non_empty($row, $columnIndex['image_url'] ?? []);
-
-    $cost    = $this->to_float($this->first_non_empty($row, $columnIndex['cost_usd'] ?? []));
-    $list    = $this->to_float($this->first_non_empty($row, $columnIndex['list_price_usd'] ?? []));
-    $special = $this->to_float($this->first_non_empty($row, $columnIndex['special_price_usd'] ?? []));
-    $fx      = $this->to_float($this->first_non_empty($row, $columnIndex['exchange_rate'] ?? []));
-    $weight  = $this->to_float($this->first_non_empty($row, $columnIndex['weight_kg'] ?? []));
-    $taxCode = $this->first_non_empty($row, $columnIndex['tax_code'] ?? []);
-
-    $lvl1    = $this->first_non_empty($row, $columnIndex['lvl1'] ?? []);
-    $lvl2    = $this->first_non_empty($row, $columnIndex['lvl2'] ?? []);
-    $lvl3    = $this->first_non_empty($row, $columnIndex['lvl3'] ?? []);
-    $lvl1_id = $this->first_non_empty($row, $columnIndex['lvl1_id'] ?? []);
-    $lvl2_id = $this->first_non_empty($row, $columnIndex['lvl2_id'] ?? []);
-    $lvl3_id = $this->first_non_empty($row, $columnIndex['lvl3_id'] ?? []);
-
-    $stockFromColumn = $this->to_int($this->first_non_empty($row, $columnIndex['stock_total'] ?? []));
-    $stockMainColumn = $this->to_int($this->first_non_empty($row, $columnIndex['stock_main'] ?? []));
-    $stockTjColumn   = $this->to_int($this->first_non_empty($row, $columnIndex['stock_tijuana'] ?? []));
-
-    $branchStocks = $this->extract_branch_stocks($row, $branchIndex);
-    if (!empty($branchStocks)) {
-      $stockTotal = array_sum($branchStocks);
-      $stockTj    = 0;
-      foreach ($branchStocks as $key => $qty) {
-        if (stripos($key, 'tijuana') !== false || stripos($key, 'tj') !== false) {
-          $stockTj += $qty;
-        }
-      }
-      $stockMain = max(0, $stockTotal - $stockTj);
-    } else {
-      $stockTotal = $stockFromColumn ?? 0;
-      $stockTj    = $stockTjColumn ?? 0;
-      $stockMain  = $stockMainColumn ?? max(0, $stockTotal - $stockTj);
-      if ($stockTotal === 0 && $stockFromColumn === null) {
-        $stockTotal = $stockMain + $stockTj;
-      }
-    }
-
-    $nameParts = [];
-    if ($brand) { $nameParts[] = $this->trim_text($brand); }
-    if ($model && strtolower($model) !== strtolower($sku)) { $nameParts[] = $this->trim_text($model); }
-    if ($title) { $nameParts[] = $this->trim_text($title); }
-    $name = trim(implode(' ', array_filter($nameParts)));
-    if ($name === '' && $sku) { $name = (string)$sku; }
-
-    $canonical = [
-      'sku'                => (string)$sku,
-      'supplier_sku'       => (string)$sku,
-      'brand'              => $brand !== null ? $this->trim_text($brand) : null,
-      'model'              => $model !== null ? $this->trim_text($model) : null,
-      'title'              => $title !== null ? $this->trim_text($title) : null,
-      'name'               => $name,
-      'description_html'   => $desc !== null ? (string)$desc : null,
-      'image_url'          => $image !== null ? (string)$image : null,
-      'cost_usd'           => $cost,
-      'list_price_usd'     => $list,
-      'special_price_usd'  => $special,
-      'exchange_rate'      => $fx,
-      'weight_kg'          => $weight,
-      'tax_code'           => $taxCode !== null ? (string)$taxCode : null,
-      'lvl1'               => $lvl1,
-      'lvl2'               => $lvl2,
-      'lvl3'               => $lvl3,
-      'lvl1_id'            => $lvl1_id,
-      'lvl2_id'            => $lvl2_id,
-      'lvl3_id'            => $lvl3_id,
-      'stock_total'        => $stockTotal,
-      'stock_main'         => $stockMain,
-      'stock_tijuana'      => $stockTj,
-      'stock_by_branch'    => !empty($branchStocks) ? $branchStocks : null,
-    ];
-
-    // Aliases temporales (mantener mientras se migra el pipeline)
-    $canonical['description']  = $canonical['description_html'];
-    $canonical['desc_html']    = $canonical['description_html'];
-    $canonical['image']        = $canonical['image_url'];
-    $canonical['img']          = $canonical['image_url'];
-    $canonical['price_usd']    = $canonical['cost_usd'];
-    $canonical['su_precio']    = $canonical['cost_usd'];
-    $canonical['price_list']   = $canonical['list_price_usd'];
-    $canonical['price_special']= $canonical['special_price_usd'];
-    $canonical['fx']           = $canonical['exchange_rate'];
-    $canonical['stock']        = $canonical['stock_total'];
-    $canonical['stock_a15']    = $canonical['stock_main'];
-    $canonical['stock_a15_tj'] = $canonical['stock_tijuana'];
-    $canonical['stock_others'] = $canonical['stock_main'];
-    if (!empty($branchStocks)) {
-      $canonical['stocks_by_branch'] = $branchStocks;
-      $canonical['stock_by_wh']      = $branchStocks;
-    }
-
-    return $canonical;
-  }
-
-  private function first_non_empty(array $row, array $indexes){
-    foreach ($indexes as $idx) {
-      if (array_key_exists($idx, $row)) {
-        $value = trim((string)$row[$idx]);
-        if ($value !== '') { return $value; }
+  private function findModeloIndex(array $meta): ?int {
+    foreach ($meta as $item) {
+      if ($this->normalizeHeader($item['original']) === 'Modelo') {
+        return $item['source_index'];
       }
     }
     return null;
   }
 
-  private function to_float($value): ?float {
-    if ($value === null) { return null; }
-    $s = trim((string)$value);
-    if ($s === '') { return null; }
-    $s = str_replace(['USD','MXN','$',"\xC2\xA0"],'', $s);
-    $s = str_replace(' ', '', $s);
-    $s = str_replace(',', '.', $s);
-    $s = preg_replace('/[^0-9\.-]/', '', $s);
-    if ($s === '' || $s === '-' || $s === '.') { return null; }
-    return (float)$s;
+  /**
+   * @param array<int,array{normalized:string,source_index:int,original:string,is_sku:bool}> $meta
+   * @return array<int,array{normalized:string,source_index:int,original:string,is_sku:bool}>
+   */
+  private function ensureSkuColumn(array $meta, ?int $modeloIndex): array {
+    $hasSku = false;
+    foreach ($meta as $item) {
+      if ($item['is_sku']) {
+        $hasSku = true;
+        break;
+      }
+    }
+
+    if ($hasSku) {
+      return $meta;
+    }
+
+    $insertPosition = count($meta);
+    if ($modeloIndex !== null) {
+      foreach ($meta as $idx => $item) {
+        if ($item['source_index'] === $modeloIndex) {
+          $insertPosition = $idx + 1;
+          break;
+        }
+      }
+    }
+
+    $skuMeta = [
+      'normalized'   => 'SKU',
+      'source_index' => $modeloIndex ?? 0,
+      'original'     => 'SKU',
+      'is_sku'       => true,
+    ];
+
+    array_splice($meta, $insertPosition, 0, [$skuMeta]);
+    return $meta;
   }
 
-  private function to_int($value): ?int {
-    if ($value === null) { return null; }
-    $s = trim((string)$value);
-    if ($s === '') { return null; }
-    $s = preg_replace('/[^0-9\-]/','', $s);
-    if ($s === '' || $s === '-') { return null; }
-    return (int)$s;
+  /**
+   * @param array<int,array{normalized:string,source_index:int,original:string,is_sku:bool}> $meta
+   * @return array<int,string>
+   */
+  private function finalizeHeaderNames(array &$meta): array {
+    $normalizedNames = array_map(function ($item) {
+      return $item['normalized'];
+    }, $meta);
+
+    $unique = $this->ensureUniqueNames($normalizedNames);
+    foreach ($meta as $index => &$item) {
+      $item['normalized'] = $unique[$index];
+      if ($item['is_sku']) {
+        $item['normalized'] = 'SKU';
+      }
+    }
+    unset($item);
+
+    return array_map(function ($item) {
+      return $item['normalized'];
+    }, $meta);
   }
 
-  private function trim_text(?string $value): ?string {
-    if ($value === null) { return null; }
-    $t = trim($value);
-    $t = preg_replace('/\s+/u',' ', $t);
-    return $t === '' ? null : $t;
+  /**
+   * @param array<int,string> $headers
+   * @return array<int,string>
+   */
+  private function ensureUniqueNames(array $headers): array {
+    $seen = [];
+    $result = [];
+    foreach ($headers as $header) {
+      $base = $header !== '' ? $header : 'Column';
+      $candidate = $base;
+      $suffix = 2;
+      while (isset($seen[$candidate])) {
+        $candidate = $base . '_' . $suffix;
+        $suffix++;
+      }
+      $seen[$candidate] = true;
+      $result[] = $candidate;
+    }
+    return $result;
+  }
+
+  private function normalizeHeader(string $header): string {
+    $header = trim($header);
+    $header = $this->removeDiacritics($header);
+    $header = preg_replace('/\s+/u', '_', $header);
+    $header = preg_replace('/[^A-Za-z0-9_]/u', '_', $header);
+    $header = preg_replace('/_+/', '_', $header);
+    return trim($header, '_');
+  }
+
+  private function removeDiacritics(string $value): string {
+    if ($value === '') {
+      return $value;
+    }
+    if (class_exists('Transliterator')) {
+      $trans = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC;');
+      if ($trans) {
+        $value = $trans->transliterate($value);
+      }
+      return $value;
+    }
+    $converted = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value);
+    if ($converted !== false) {
+      return $converted;
+    }
+    return $value;
+  }
+
+  private function isSkuLabel(string $label): bool {
+    return strcasecmp($this->normalizeHeader($label), 'SKU') === 0;
   }
 
   /**
    * @param array<int,string> $row
-   * @param array<string,int> $branchIndex
-   * @return array<string,int>
    */
-  private function extract_branch_stocks(array $row, array $branchIndex): array {
-    $out = [];
-    foreach ($branchIndex as $aliasKey => $idx) {
-      if (!array_key_exists($idx, $row)) { continue; }
-      $qty = $this->to_int($row[$idx]);
-      if ($qty === null) { continue; }
-      $out[$aliasKey] = max(0, $qty);
+  private function isEmptyRow(array $row): bool {
+    foreach ($row as $value) {
+      if (trim((string) $value) !== '') {
+        return false;
+      }
     }
-    return $out;
+    return true;
   }
 
   /**
-   * @return array<string,bool>
+   * @param array<int,string> $row
    */
-  private function load_l1_exclusions(string $path): array {
-    if (!file_exists($path)) { return []; }
-    $fh = fopen($path, 'r');
-    if (!$fh) { return []; }
-    $out = [];
-    while (($line = fgetcsv($fh)) !== false) {
-      $id = trim((string)($line[0] ?? ''));
-      if ($id !== '') { $out[$id] = true; }
+  private function valueFromRow(array $row, int $index): string {
+    if (!array_key_exists($index, $row)) {
+      return '';
     }
-    fclose($fh);
-    return $out;
+    $value = (string) $row[$index];
+    return $this->sanitizeValue($value);
+  }
+
+  /**
+   * @param array<string,string> $assoc
+   */
+  private function encodeJsonLine(array $assoc): string {
+    $encoded = json_encode($assoc, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($encoded === false) {
+      $this->cli_error('No se pudo codificar una fila a JSON.');
+    }
+    return $encoded . "\n";
+  }
+
+  private function sanitizeValue(string $value): string {
+    if ($value === '') {
+      return '';
+    }
+
+    if (function_exists('mb_check_encoding') && mb_check_encoding($value, 'UTF-8')) {
+      return $value;
+    }
+
+    $converted = false;
+    if (function_exists('mb_convert_encoding')) {
+      $converted = @mb_convert_encoding($value, 'UTF-8', 'WINDOWS-1252');
+    }
+    if (is_string($converted) && $converted !== '') {
+      return $converted;
+    }
+
+    $iconv = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+    if ($iconv !== false && $iconv !== '') {
+      return $iconv;
+    }
+
+    return preg_replace('/[\x00-\x1F\x7F]/', '', $value);
+  }
+
+  private function cli_error(string $message): void {
+    if (class_exists('\\WP_CLI')) {
+      \WP_CLI::error($message);
+    }
+    throw new \RuntimeException($message);
   }
 }

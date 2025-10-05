@@ -61,6 +61,27 @@ Repositorio central para el proyecto **Compustar**, integraciones y scripts rela
 - Este repo está pensado para usarse con GitHub y AICodex.
 - Recuerda mantener fuera de Git cualquier credencial sensible (`.env` ya está en .gitignore).
 
+## Stage 01–02 (repo)
+
+### Requisitos
+- PHP 8+ con extensiones estándar (json, iconv o intl).
+- Python 3.8+ y `jq` para las verificaciones.
+
+### Comandos de ejemplo
+```bash
+bash tests/run_stage01_02.sh \
+  --csv data/ProductosHora_subset_1000_5000.csv \
+  --run_dir tests/tmp/run-$$
+
+make stage01_02
+```
+
+### Checks obligatorios
+- `source.csv` se crea en el RUN_DIR, mantiene el encabezado original y tiene más de una fila.
+- `normalized.jsonl` y `normalized.csv` existen, comparten las mismas columnas normalizadas y cada objeto/registro incluye `SKU` (copiado desde `Modelo`).
+- Los nombres de columna se normalizan quitando acentos y reemplazando espacios por guiones bajos.
+- Los conteos de filas entre `source.csv`, `normalized.jsonl` y `normalized.csv` son consistentes.
+
 > Roles/RACI/DoD: ver documento “Equipo y responsabilidades” y la sección de operación del diario.
 <!-- END:CCX_REPOS_SUMMARY -->
 > Roles/RACI/DoD: ver documento “Equipo y responsabilidades” y la sección de operación del diario.
