@@ -2,6 +2,57 @@
 
 Este documento resume tablas detectadas en el dump y servirá como contrato de referencia para desarrollo.
 
+## Diccionario canónico LEGO
+
+| Clave | Descripción |
+|---|---|
+| `sku` | Identificador principal del producto (SKU Syscom) utilizado en todo el pipeline. |
+| `supplier_sku` | SKU entregado por el proveedor (mismo valor que `sku` para Syscom, reservado para futuros proveedores). |
+| `brand` | Marca o fabricante normalizado. |
+| `model` | Modelo o referencia de fabricante. |
+| `title` | Título descriptivo corto. |
+| `name` | Nombre amigable construido (`brand` + `model` + `title`). |
+| `description_html` | Descripción en HTML; alias `description`. |
+| `image_url` | URL principal de imagen; alias `image`. |
+| `cost_usd` | Costo base del proveedor expresado en USD. |
+| `list_price_usd` | Precio de lista del proveedor, cuando existe. |
+| `special_price_usd` | Precio promocional del proveedor. |
+| `exchange_rate` | Tipo de cambio aplicado al costo. |
+| `stock_total` | Existencias totales disponibles. |
+| `stock_main` | Existencias fuera de Tijuana (almacén 15). |
+| `stock_tijuana` | Existencias en Tijuana (almacén 15 TJ). |
+| `stock_by_branch` | Mapa JSON con inventario por sucursal detectada. |
+| `weight_kg` | Peso en kilogramos. |
+| `tax_code` | Clave fiscal o CFDI asociado. |
+| `lvl1_id`, `lvl2_id`, `lvl3_id` | Identificadores jerárquicos del menú Syscom. |
+
+### Tabla `wp_compu_offers` (esquema canónico 2025-10)
+
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | `bigint` | PK autoincremental. |
+| `product_id` | `bigint` | `wp_posts.ID` del producto WooCommerce (nullable mientras se resuelve el match). |
+| `source` | `varchar(64)` | Identificador del proveedor/origen (`syscom`, etc.). |
+| `supplier_sku` | `varchar(191)` | SKU suministrado por el proveedor. Único junto con `source`. |
+| `cost_usd` | `decimal(12,4)` | Costo base en USD. |
+| `exchange_rate` | `decimal(10,4)` | Tipo de cambio aplicado. |
+| `stock_total` | `int` | Inventario total disponible. |
+| `stock_main` | `int` | Inventario fuera de Tijuana. |
+| `stock_tijuana` | `int` | Inventario correspondiente a Tijuana. |
+| `stock_by_branch_json` | `longtext` | JSON con inventario por sucursal (llaves `stock_*`). |
+| `currency` | `char(3)` | Moneda del costo (por default `USD`). |
+| `offer_hash` | `char(32)` | Huella para detectar cambios (opcional). |
+| `valid_from` | `datetime` | Inicio de vigencia de la oferta. |
+| `created_at` | `datetime` | Timestamp de creación. |
+| `updated_at` | `datetime` | Timestamp de última sincronización. |
+| `supplier` | `varchar(50)` | Nombre corto del proveedor (metadata). |
+| `warehouse_id` | `int` | Identificador interno de almacén. |
+| `warehouse_code` | `varchar(50)` | Código textual de almacén. |
+| `lead_time_days` | `int` | Tiempo de entrega estimado. |
+| `is_refurb` | `tinyint(1)` | Indicador refurb. |
+| `is_oem` | `tinyint(1)` | Indicador OEM. |
+| `is_bundle` | `tinyint(1)` | Indicador bundle. |
+
 ## Tablas `wp_compu_*`
 
 ### wp_compu_brands

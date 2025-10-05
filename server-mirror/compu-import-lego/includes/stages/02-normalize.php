@@ -1,578 +1,465 @@
 <?php
+if (!defined('ABSPATH')) { exit; }
+
+require_once dirname(__DIR__) . '/helpers/helpers-common.php';
+require_once dirname(__DIR__) . '/helpers/helpers-db.php';
+
 /**
  * Stage 02 - NORMALIZE
  *
- * Objetivo:
- * - Leer el CSV crudo (source.csv) del run actual.
- * - Detectar separador y normalizar encabezados (quitar acentos, minúsculas, espacios).
- * - Resolver "sinónimos" de columnas según la política de campos Syscom.
- * - Construir un registro uniforme por fila y escribirlo en normalized.jsonl (JSON Lines).
- * - Dejar trazas: header-map.json, contadores (fallback_sku, duplicados, filas saltadas).
- *
- * Notas de diseño:
- * - Este stage NO calcula márgenes/IVA ni hace mapping a categorías (eso es en resolve-map / offers).
- * - Aplica saneo básico de tipos (numéricos y strings).
- * - Si falta identificador (SKU/Modelo) se registra error y se omite esa fila aquí,
- *   para que las siguientes etapas trabajen con un set depurado.
+ * Lee el CSV crudo del run y construye un diccionario canónico por fila.
+ * El diccionario mantiene alias temporales para compatibilidad mientras
+ * el resto del pipeline migra a los nuevos nombres (`cost_usd`,
+ * `exchange_rate`, `stock_total`, etc.).
  */
-
-if (!defined('ABSPATH')) { exit; }
-
 class Compu_Stage_Normalize {
+  /** @var array<string,array<int,string>> */
+  private $headerSynonyms = [];
+  /** @var array<string,array<int,string>> */
+  private $branchSynonyms = [];
 
-  /** Enclosure y escape explícitos (evitan deprecations en PHP 8.2/8.3) */
-  private $csv_enclosure = '"';
-  private $csv_escape    = '\\';
+  public function __construct(){
+    $this->bootstrapSynonyms();
+  }
 
-  /** Sinónimos canónicos por política */
-  private $syn = [
-    'modelo'          => ['modelo','model','mpn'],
-    'marca'           => ['marca','brand'],
-    'titulo'          => ['titulo','título','title','nombre','tm-cm--tulo','t?ulo','t?tulo','tit?lo'],
-    'precio_lista'    => ['precio lista','lista','precio de lista'],
-    'precio_especial' => ['precio especial'],
-    'su_precio'       => ['su precio','precio usd','precio_usd','precio','costo usd'],
-    'existencias'     => ['existencias','stock','inventario','existencia'],
-    'codigo_fiscal'   => ['codigo fiscal','código fiscal','cfdi','clave fiscal','sat'],
-    'peso_kg'         => ['peso kg','peso','weight','kg'],
-    'descripcion'     => ['descripcion','descripción','description','desc','detalle','descripci?n','descripci?on'],
-    'imagen'          => ['imagen principal','imagen','image','img','foto','picture','url imagen','imagen principal?','imagen principal '],
-    'tipo_cambio'     => ['tipo de cambio','tc','tipo_cambio','exchange','exchange rate','tasa cambio'],
-
-    // Menú/IDs (informativos para auditoría; mapeo real en resolve-map):
-    'menu_n1'         => ['menu nvl 1','menu 1','nivel 1','categoria','categoría'],
-    'menu_n2'         => ['menu nvl 2','menu 2','nivel 2','subcategoria','sub-categoria','subcategoría'],
-    'menu_n3'         => ['menu nvl 3','menu 3','nivel 3','subsubcategoria','sub-subcategoria'],
-    'id_n1'           => ['id menu nvl 1','id_menu_nvl_1','id nivel 1','id cat 1','lvl1_id','lvl1','n1_id'],
-    'id_n2'           => ['id menu nvl 2','id nivel 2','id cat 2'],
-    'id_n3'           => ['id menu nvl 3','id nivel 3','id cat 3','lvl3','lvl 3','id lvl3'],
-  ];
-
+  /**
+   * Punto de entrada desde WP-CLI (`wp compu stage normalize`).
+   * @param array<string,mixed> $args
+   */
   public function run($args){
     $run_id = compu_import_run_id_from_arg($args['run-id'] ?? 'last');
+    $base   = compu_import_get_base_dir();
+    $dir    = trailingslashit($base).'run-'.$run_id;
+    $src    = $dir.'/source.csv';
+    $srcEnv = getenv('CSV_SRC');
+    if ($srcEnv && file_exists($srcEnv)) { $src = $srcEnv; }
+    if (!file_exists($src)) { \WP_CLI::error('Falta source.csv; ejecuta fetch antes de normalize.'); }
 
-    
-    // === EXCLUSIONES L1 ===
+    $normalized = $dir.'/normalized.jsonl';
+    $headerMap  = $dir.'/header-map.json';
+    $dupesCsv   = $dir.'/duplicates.csv';
+    @unlink($normalized);
+    @unlink($headerMap);
+    @unlink($dupesCsv);
+    touch($normalized);
+
+    $fh = fopen($src, 'r');
+    if (!$fh) { \WP_CLI::error('No se pudo abrir source.csv para lectura'); }
+
+    $delimiter   = $this->detect_delimiter($src);
+    $header_raw  = fgetcsv($fh, 0, $delimiter, '"', '\\');
+    if ($header_raw === false) {
+      fclose($fh);
+      \WP_CLI::error('El CSV no tiene cabecera legible.');
+    }
+
+    $header_norm = array_map(function($h){ return $this->norm_header($h); }, $header_raw);
+    $columnIndex = $this->build_column_index($header_norm);
+    $branchIndex = $this->build_branch_index($header_norm);
+
+    $hdr_meta = [
+      'header'            => $header_raw,
+      'normalized'        => $header_norm,
+      'column_index'      => $columnIndex,
+      'branch_index'      => $branchIndex,
+      'detected_delimiter'=> $delimiter,
+    ];
+    file_put_contents(
+      $headerMap,
+      wp_json_encode($hdr_meta, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)
+    );
+
     $exclusions_csv = '/home/compustar/syscom_l1_exclusions.csv';
-    $exclude_l1 = $this->load_l1_exclusions($exclusions_csv);
-    $excluded_l1 = 0; // KPI
-// 1) Ubicar carpeta del run + archivos de I/O
-    $base = compu_import_get_base_dir();
-    $dir  = trailingslashit($base).'run-'.$run_id;
-    $src  = $dir.'/source.csv';
-    $src_env = getenv('CSV_SRC');
-    if ($src_env && file_exists($src_env)) { $src = $src_env; }
-    if (!file_exists($src)) \WP_CLI::error('Falta source.csv; corre fetch.');
+    $exclude_l1     = $this->load_l1_exclusions($exclusions_csv);
 
-    $normalized_file = $dir.'/normalized.jsonl';
-    $header_map_file = $dir.'/header-map.json';
-    $dupes_file      = $dir.'/duplicates.csv';
-    @unlink($normalized_file);
-    @unlink($header_map_file);
-    @unlink($dupes_file);
-    touch($normalized_file); // aseguramos que exista aunque no haya filas válidas
+    $seenSkus   = [];
+    $dupes      = [];
+    $written    = 0;
+    $skippedSku = 0;
 
-    // 2) Abrir CSV y detectar separador
-    $delim = $this->detect_delimiter($src);
-    $fh    = fopen($src,'r');
-    if (!$fh) \WP_CLI::error('No se pudo abrir source.csv para lectura');
-
-    // 3) Leer encabezado crudo y normalizarlo
-    $header_raw = fgetcsv($fh, 0, $delim, $this->csv_enclosure, $this->csv_escape);
-    if ($header_raw === false) { fclose($fh); \WP_CLI::error('El CSV no tiene cabecera legible.'); }
-
-    $header_norm = [];
-    foreach ($header_raw as $h) {
-      $header_norm[] = $this->norm_header($h);
-    }
-
-    // 4) Construir índice de columnas por "canónico" (usa sinónimos)
-    $col = $this->build_column_index($header_norm);
-
-    
-    
-    // WARNING si no se detecta ID Menu Nvl 1
-    if (!isset($col['id_n1']) || $col['id_n1'] === null) {
-      compu_import_log($run_id,'normalize','warning','No se detectó \"ID Menu Nvl 1\"; exclusiones L1 no aplicarán.', ['exclusions_source'=>$exclusions_csv]);
-    }
-// WARNING si no se detecta ID Menu Nvl 1
-    if (!isset($col['id_n1']) || $col['id_n1'] === null) {
-      compu_import_log($run_id,'normalize','warning','No se detectó \"ID Menu Nvl 1\"; exclusiones L1 no aplicarán.', ['exclusions_source'=>$exclusions_csv]);
-    }
-if (!isset($col['modelo']) || $col['modelo'] === null) { compu_import_log($run_id,'normalize','WARNING: Cabecera \"Modelo\" no detectada (¿BOM o nombre diferente?).'); }// Guardar header-map.json para auditoría
-   // --- Detecta columna de Tijuana (almacén 15) ---
-  $branchCols = ['15' => null];
-  foreach ($header_norm as $idx => $hn) {
-    if (strpos($hn, 'tijuana') !== false) { // cualquier variante que contenga "tijuana"
-      $branchCols['15'] = $idx;
-    }
-  }
-
-  // Guardar header-map.json con la detección
-  $hdr_meta = [
-    'header'            => $header_raw,
-    'norm'              => $header_norm,
-    'branches_detected' => $branchCols,
-  ];
-  file_put_contents(
-    $header_map_file,
-    wp_json_encode($hdr_meta, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE)
-  );
-
-
-    // 5) Recorrer filas y construir salida uniforme
-    $count=0; $skipped_no_sku=0; $fallback_sku=0;
-    $dupes = []; $seen = [];
-
-    while (($row = fgetcsv($fh, 0, $delim, $this->csv_enclosure, $this->csv_escape)) !== false) {
-      // Helper para obtener un valor por lista de claves canónicas (usa $col)
-      $get = function(array $candidates) use ($row, $col) {
-        foreach ($candidates as $c) {
-          $i = $col[$c] ?? null;
-          if ($i !== null && array_key_exists($i, $row)) {
-            $val = $this->trim_collapse((string)$row[$i]);
-            if ($val !== '') return $val;
-          }
-        }
-        return '';
-      };
-
-      // 5.1 Resolver identificador (SKU) a partir de "modelo" y alias
-      $modelo = $get(['modelo']);
-      $sku    = $modelo !== '' ? $modelo : $get(['modelo','id_n3','id_n2','id_n1']); // fallback muy laxo si viniera vacío
-      if ($sku === '') {
-        // Si realmente no hay identificador, log de error y omitir
-        compu_import_log($run_id,'normalize','error','Fila omitida: Sin Modelo/SKU detectable', ['row_sample'=>array_slice($row,0,6)]);
-        $skipped_no_sku++; 
+    while (($row = fgetcsv($fh, 0, $delimiter, '"', '\\')) !== false) {
+      $canon = $this->build_canonical_row($row, $columnIndex, $branchIndex);
+      if ($canon === null) {
+        $skippedSku++;
+        compu_import_log($run_id,'normalize','error','Fila omitida: sin SKU detectable');
         continue;
       }
-      if ($modelo === '') { $fallback_sku++; } // contemos cuando no vino explícito en "Modelo"
 
-      // 5.2 Suma de campos principales (strings)
-      $brand   = $get(['marca']);
-      $title   = $get(['titulo']);
-      $desc    = $get(['descripcion']);
-      $img     = $get(['imagen']);
-
-      // 5.3 Numéricos con saneo
-      $price_usd = $this->to_float($get(['su_precio']));
-      $price_list = $this->to_float($get(['precio_lista']));
-      $price_special = $this->to_float($get(['precio_especial']));
-      $fx       = $this->to_float($get(['tipo_cambio']));
-      $stock    = $this->to_int($get(['existencias']));
-      
-      // Fallbacks adicionales
-      if ($fx === null || $fx === 0.0) {
-        // Algunos feeds traen 'exchange' como texto/float alterno
-        $fx_alt = $this->to_float($get(['tipo_cambio','exchange']));
-        if ($fx_alt !== null && $fx_alt > 0) { $fx = $fx_alt; }
-      }
-
-
-      // 5.4.1 Derivar stock por sucursales (si el CSV viene con columnas por sucursal)
-      $stock_tijuana = null; $stock_others = null; $stock_total = null;
-      // Lista de cabeceras normalizadas que consideraremos como sucursales
-      $branch_headers = [
-        'chihuahua','cd. juarez','guadalajara','los mochis','merida','mexico norte','mexico sur',
-        'monterrey','puebla','queretaro','tijuana','villahermosa','leon','hermosillo','san luis potosi',
-        'torreon','chihuahua cedis','toluca','stock queretaro cedis','queretaro cedis','veracruz','stock veracruz','tepotzotlan','stock tepotzotlan',
-        'cancun','stock cancun','culiacan','stock culiacan','monterrey centro','stock monterrey centro'
-      ];
-      $branch_indices = [];
-      foreach ($header_norm as $idx => $hn) {
-        if (in_array($hn, $branch_headers, true)) {
-          $branch_indices[$hn] = $idx;
-        }
-      }
-      if (!empty($branch_indices)) {
-        $sum = 0;
-        foreach ($branch_indices as $hn => $idx) {
-          $v = $row[$idx] ?? '';
-          $n = $this->to_int($v);
-          if ($n === null) { $n = 0; }
-          if ($n < 0) { $n = 0; }
-          if ($hn === 'tijuana') {
-            $stock_tijuana = $n;
-          } else {
-            $sum += $n;
-          }
-        }
-        if ($stock_tijuana === null) { $stock_tijuana = 0; }
-        $stock_others = $sum;
-        $stock_total  = $stock_tijuana + $stock_others;
-        // Si el campo 'existencias' venía vacío, usamos el total derivado
-        if ($stock === null) { $stock = $stock_total; }
-      }
-
-      $weight   = $this->to_float($get(['peso_kg']));
-
-      // 5.4 Menús/IDs informativos
-      $lvl1   = $get(['menu_n1']);
-      $lvl2   = $get(['menu_n2']);
-      $lvl3   = $get(['menu_n3']);
-      $lvl1_id= $get(['id_n1']);
-      
-      // === EXCLUSIÓN L1: si el L1 está excluido, saltar la fila
-      if ($lvl1_id !== '' && isset($exclude_l1[$lvl1_id])) {
-        compu_import_log($run_id,'normalize','info','Fila excluida por L1', [
-          'id_menu_nvl1' => $lvl1_id
+      // Exclusión por L1 si aplica
+      $lvl1_id = $canon['lvl1_id'] ?? null;
+      if ($lvl1_id && isset($exclude_l1[$lvl1_id])) {
+        compu_import_log($run_id, 'normalize', 'info', 'Fila excluida por L1', [
+          'lvl1_id' => $lvl1_id,
+          'sku'     => $canon['sku'],
         ]);
-        $excluded_l1++;
         continue;
       }
-$lvl2_id= $get(['id_n2']);
-      $lvl3_id= $get(['id_n3']);
 
-      // 5.5 Código fiscal (opcional)
-      $fiscal = $get(['codigo_fiscal']);
-
-      // 5.6 Nombre "amistoso" para etapas siguientes (composición segura)
-      $name = $this->trim_collapse(trim(($brand ? $brand.' ' : '').($sku ? $sku.' ' : '').($title ?: '')));
-
-      // 5.7 Detectar duplicados de SKU en el mismo CSV (case-insensitive)
-      $sku_key = mb_strtolower($sku, 'UTF-8');
-      if (isset($seen[$sku_key])) {
-        $seen[$sku_key]++;
-        $dupes[$sku] = ($dupes[$sku] ?? 1) + 1;
-      } else {
-        $seen[$sku_key] = 1;
+      $key = mb_strtolower($canon['sku'], 'UTF-8');
+      if (isset($seenSkus[$key])) {
+        $dupes[$canon['sku']] = ($dupes[$canon['sku']] ?? 1) + 1;
       }
+      $seenSkus[$key] = true;
 
-      // === Build warehouse map for A15 vs A15_TJ (fuera del array) ===
-      // Fallback si no hubo desglose por sucursal pero tenemos totales
-      if (!isset($stock_others) && $stock !== null && isset($stock_tijuana)) {
-        $stock_others = max(0, (int)$stock - (int)$stock_tijuana);
-        $stock_total  = (int)$stock;
-      }
-
-      $stock_a15    = isset($stock_others)  ? (int) $stock_others  : null; 
-      $stock_a15_tj = isset($stock_tijuana) ? (int) $stock_tijuana : null; 
-      $stock_by_wh  = (isset($stock_a15) || isset($stock_a15_tj)) 
-        ? array_filter(["15" => $stock_a15, "15_TJ" => $stock_a15_tj], function ($v) { return $v !== null; }) 
-        : null; 
-
-      // === A15/A15_TJ map (fuera del array) ===
-      $stock_a15    = isset($stock_others)  ? (int)$stock_others  : null; 
-      $stock_a15_tj = isset($stock_tijuana) ? (int)$stock_tijuana : null; 
-      $stock_by_wh  = (isset($stock_a15) || isset($stock_a15_tj)) 
-        ? array_filter(["15"=>$stock_a15, "15_TJ"=>$stock_a15_tj], function($v){return $v !== null;}) 
-        : null; 
-
-      // 5.8 Construir la fila normalizada
-      $norm = [
-        // Identidad
-        'sku'          => $sku,
-        'supplier_sku' => $sku,
-        'model'        => $modelo, // guardamos el texto tal cual vino en "Modelo" (si venía)
-        'brand'        => $brand,
-        'title'        => $title,
-        'name'         => $name,
-
-        // Contenido/medios
-        'desc_html'    => $desc,
-        'img'          => $img,
-        
-        // Compat: duplicados con nombres históricos
-        'description'   => $desc,
-        'image'         => $img,
-
-
-        // Precios/stock base (sin márgenes/IVA; eso se calcula en offers)
-        'price_usd'    => $price_usd,      // "Su Precio" (USD)
-        'price_list'   => $price_list,     // referencia proveedor
-        'price_special'=> $price_special,  // promo proveedor
-        'fx'           => $fx,             // Tipo de cambio
-        'stock'        => $stock,
-
-        // Logística
-        'weight'       => $weight,
-
-        // Fiscal
-        'fiscal_code'  => $fiscal,
-
-        // Menús/IDs informativos (auditoría y soporte al mapeo)
-        'lvl1'         => $lvl1,
-        'lvl2'         => $lvl2,
-        'lvl3'         => $lvl3,
-        'lvl1_id'      => $lvl1_id,
-        'lvl2_id'      => $lvl2_id,
-        'lvl3_id'      => $lvl3_id,
-
-        // Derivados de sucursales (si aplica)
-        'stock_tijuana' => isset($stock_tijuana) ? $stock_tijuana : null,
-        'stock_others'  => isset($stock_others) ? $stock_others : null,
-        'stock_total'   => isset($stock_total) ? $stock_total : null,
-          'stock_a15'     => $stock_a15, 
-          'stock_a15_tj'  => $stock_a15_tj, 
-          'stock_by_wh'   => $stock_by_wh, 
-
-
-      ];
-
-      // 5.9 Escribir en JSONL (una fila por línea)
-      // === BEGIN Leo Patch v1: SKU, FX y Suma de inventarios (A15 / A15_TJ) ===
-
-// SKU desde aliases (modelo/código → sku)
-if (empty($norm['sku'])) {
-  if (!empty($norm['model']))      $norm['sku'] = (string)$norm['model'];
-  elseif (!empty($norm['modelo'])) $norm['sku'] = (string)$norm['modelo'];
-  elseif (!empty($norm['codigo'])) $norm['sku'] = (string)$norm['codigo'];
-  elseif (!empty($norm['code']))   $norm['sku'] = (string)$norm['code'];
-}
-
-// Tipo de cambio unificado a 'fx' (algunos proveedores lo mandan como 'exchange')
-if (empty($norm['fx']) && !empty($norm['exchange'])) {
-  $norm['fx'] = (float) str_replace(',', '.', (string)$norm['exchange']);
-}
-
-// Reducción de inventarios por sucursal → stock_a15 (suma excepto Tijuana) y stock_a15_tj
-$sum_all = null; $sum_tj = null;
-
-if (isset($norm['stocks_by_branch']) && is_array($norm['stocks_by_branch'])) {
-  $sum_all = 0; $sum_tj = 0;
-  foreach ($norm['stocks_by_branch'] as $branch => $qty) {
-    $q = (int)$qty;
-    $sum_all += $q;
-    if (preg_match('/tijuana|tj/i', (string)$branch)) {
-      $sum_tj += $q;
-    }
-  }
-  // Total general y cortes A15/A15_TJ
-  $norm['stock']        = $sum_all;
-  $norm['stock_a15_tj'] = $sum_tj;
-  $norm['stock_a15']    = max(0, $sum_all - $sum_tj);
-} else {
-  // Fallback si no hay desglose por sucursal, pero sí totales
-  if (isset($norm['stock']) && isset($norm['stock_a15_tj'])) {
-    $sum_all = (int)$norm['stock'];
-    $sum_tj  = (int)$norm['stock_a15_tj'];
-    $norm['stock_a15'] = max(0, $sum_all - $sum_tj);
-  }
-}
-
-// Saneos finales de inventario (no negativos)
-foreach (['stock','stock_a15','stock_a15_tj'] as $k) {
-  if (isset($norm[$k])) $norm[$k] = max(0, (int)$norm[$k]);
-}
-
-// === END Leo Patch v1 ===
-      // === Normalizar y propagar 'lvl1_id' ===
-      if (!isset($outRow['lvl1_id']) || $outRow['lvl1_id'] === '' || $outRow['lvl1_id'] === '---') {
-          $lvl1 = '';
-          foreach (['lvl1_id','id_n1','ID Menu Nvl 1','lvl1','n1_id','id_menu_nvl_1'] as $k) {
-              $val = isset($get) ? $get([$k]) : '';
-              if ($val !== '' ) { $lvl1 = (string)$val; break; }
-          }
-          if ($lvl1 !== '' ) { $outRow['lvl1_id'] = $lvl1; }
-      }
-      // === Normalizar y propagar 'lvl1_id' (aliases y fallback) ===
-      if (!isset($norm['lvl1_id']) || $norm['lvl1_id'] === '' || $norm['lvl1_id'] === '---') {
-          $lvl1 = '';
-          foreach (['lvl1_id','id_n1','lvl1','n1_id','ID Menu Nvl 1','id_menu_nvl_1'] as $k) {
-              if (isset($norm[$k]) && trim((string)$norm[$k]) !== '' ) { $lvl1 = trim((string)$norm[$k]); break; }
-          }
-          if ($lvl1 !== '' ) { $norm['lvl1_id'] = $lvl1; }
-      }
-      // === Normalizar y propagar 'lvl1_id' (aliases y fallback) ===
-      if (!isset($norm['lvl1_id']) || $norm['lvl1_id'] === '' || $norm['lvl1_id'] === '---') {
-          $lvl1 = '';
-          foreach (['lvl1_id','id_n1','lvl1','n1_id','ID Menu Nvl 1','id_menu_nvl_1'] as $k) {
-              if (isset($norm[$k]) && trim((string)$norm[$k]) !== '' ) { $lvl1 = trim((string)$norm[$k]); break; }
-          }
-          if ($lvl1 !== '' ) { $norm['lvl1_id'] = $lvl1; }
-      }
-      // === Propagar lvl1_id (aliases) — CompuFix ===
-      if (!isset($norm['lvl1_id']) || $norm['lvl1_id']==='' || $norm['lvl1_id']==='---') {
-        $lvl1 = '';
-        foreach (['lvl1_id','id_n1','id_menu_nvl_1','ID Menu Nvl 1','lvl1','n1_id'] as $k) {
-          if (isset($norm[$k]) && trim((string)$norm[$k])!=='' ) { $lvl1 = trim((string)$norm[$k]); break; }
-        }
-        if ($lvl1!=='' ) { $norm['lvl1_id'] = $lvl1; }
-      }
-compu_import_append_jsonl($normalized_file, $norm);
-      $count++;
+      compu_import_append_jsonl($normalized, $canon);
+      $written++;
     }
     fclose($fh);
 
-    // 6) Si hubo duplicados, dejar CSV de soporte + log (no detenemos el run aquí)
-    $dupe_count = 0;
     if (!empty($dupes)) {
-      $fh_d = fopen($dupes_file, 'w');
-      fputcsv($fh_d, ['sku','count'], ',', $this->csv_enclosure, $this->csv_escape);
-      foreach ($dupes as $k => $c) {
-        if ($c > 1) { $dupe_count++; }
-        fputcsv($fh_d, [$k, $c], ',', $this->csv_enclosure, $this->csv_escape);
+      $fhDupes = fopen($dupesCsv, 'w');
+      fputcsv($fhDupes, ['sku','duplicate_count']);
+      foreach ($dupes as $sku => $count) {
+        fputcsv($fhDupes, [$sku, $count]);
+        compu_import_log($run_id,'normalize','warning','SKU duplicado detectado',[
+          'sku' => $sku,
+          'count' => $count,
+        ]);
       }
-      fclose($fh_d);
-      compu_import_log($run_id,'normalize','warning','SKU duplicados detectados en CSV', [
-        'dupes_file'=>$dupes_file, 'distinct_dupes'=>$dupe_count
-      ]);
+      fclose($fhDupes);
     }
 
-    // 7) Resumen/bitácora del stage
-    compu_import_log($run_id,'normalize','info','Normalizadas filas',[
-      'count'          => $count,
-      'file'           => $normalized_file,
-      'header_map'     => $header_map_file,
-      'fallback_sku'   => $fallback_sku,
-      'skipped_no_sku' => $skipped_no_sku,
-      'dupe_sku_count' => $dupe_count
+    compu_import_log($run_id,'normalize','info','Stage 02 completado',[
+      'rows_written'   => $written,
+      'skipped_no_sku' => $skippedSku,
     ]);
-
-    
-    // Resumen exclusión L1
-    compu_import_log($run_id,'normalize','info','Resumen exclusión L1', [
-      'excluded_l1_rows' => $excluded_l1,
-      'exclusions_source' => $exclusions_csv,
-    ]);
-\WP_CLI::success("Run {$run_id}: normalizadas {$count} (fallback_sku={$fallback_sku}, skipped_no_sku={$skipped_no_sku}, dupes={$dupe_count}) -> normalized.jsonl");
   }
 
-  /* ====================== Helpers internos ====================== */
+  private function bootstrapSynonyms(): void {
+    $aliasFile = dirname(__DIR__, 2).'/aliases.json';
+    $raw       = [];
+    if (file_exists($aliasFile)) {
+      $json = json_decode(file_get_contents($aliasFile), true);
+      if (is_array($json)) { $raw = $json; }
+    }
+
+    $map = [
+      'sku'             => ['sku','modelo','model','mpn','codigo','code','clave','product_code'],
+      'supplier_sku'    => ['supplier_sku','sku_proveedor'],
+      'brand'           => ['brand','marca'],
+      'model'           => ['model','modelo','mpn'],
+      'title'           => ['title','titulo','título','nombre','product_title'],
+      'description_html'=> ['description','descripcion','descripción','desc','detalle','html','content'],
+      'image_url'       => ['image_url','imagen','imagen_principal','image','img','picture','url_imagen'],
+      'cost_usd'        => ['cost_usd','su_precio','su precio','precio_usd','precio usd','precio','price_customer'],
+      'list_price_usd'  => ['list_price','price_list','precio_lista','lista'],
+      'special_price_usd'=> ['special_price','precio_especial'],
+      'exchange_rate'   => ['exchange_rate','tipo_cambio','tipo de cambio','tc','exchange'],
+      'weight_kg'       => ['weight_kg','peso','peso_kg','peso kg','weight'],
+      'tax_code'        => ['tax_code','codigo_fiscal','código fiscal','clave fiscal','cfdi'],
+      'lvl1'            => ['lvl1','menu_n1','menu 1','nivel 1','categoria','categoría'],
+      'lvl2'            => ['lvl2','menu_n2','menu 2','nivel 2','subcategoria','sub-categoria'],
+      'lvl3'            => ['lvl3','menu_n3','menu 3','nivel 3','subsubcategoria'],
+      'lvl1_id'         => ['lvl1_id','id_n1','id menu nvl 1','id_menu_nvl_1'],
+      'lvl2_id'         => ['lvl2_id','id_n2','id menu nvl 2','id_menu_nvl_2'],
+      'lvl3_id'         => ['lvl3_id','id_n3','id menu nvl 3','id_menu_nvl_3'],
+      'stock_total'     => ['stock_total','stock','existencias','existencia','inventario'],
+      'stock_tijuana'   => ['stock_tijuana','tijuana','stock tj'],
+      'stock_main'      => ['stock_main','stock_otros','stock_others','stock_a15'],
+    ];
+
+    foreach ($raw as $aliasKey => $variants) {
+      if (!is_array($variants)) { continue; }
+      $canonical = $this->mapAliasKeyToCanonical($aliasKey);
+      if (!$canonical) { continue; }
+      foreach ($variants as $variant) {
+        $map[$canonical][] = $variant;
+      }
+    }
+
+    foreach ($map as $canonical => $variants) {
+      $norm = [];
+      foreach ($variants as $variant) {
+        $v = $this->norm_header($variant);
+        if ($v !== '') { $norm[$v] = true; }
+      }
+      $this->headerSynonyms[$canonical] = array_keys($norm);
+    }
+
+    // Branch aliases (solo guardamos normalizados)
+    $branchMap = [];
+    foreach ($raw as $aliasKey => $variants) {
+      if (strpos($aliasKey, 'stock_') !== 0) { continue; }
+      if (!is_array($variants)) { continue; }
+      foreach ($variants as $variant) {
+        $branchMap[$aliasKey][] = $this->norm_header($variant);
+      }
+    }
+    $this->branchSynonyms = $branchMap;
+  }
+
+  private function mapAliasKeyToCanonical(string $aliasKey): ?string {
+    $map = [
+      'sku'           => 'sku',
+      'brand'         => 'brand',
+      'title'         => 'title',
+      'price_customer'=> 'cost_usd',
+      'price_list'    => 'list_price_usd',
+      'price_special' => 'special_price_usd',
+      'exchange_rate' => 'exchange_rate',
+      'weight_kg'     => 'weight_kg',
+      'tax_code'      => 'tax_code',
+      'description'   => 'description_html',
+      'image_url'     => 'image_url',
+      'cat_lvl1'      => 'lvl1',
+      'cat_lvl2'      => 'lvl2',
+      'cat_lvl3'      => 'lvl3',
+      'cat_id_lvl1'   => 'lvl1_id',
+      'cat_id_lvl2'   => 'lvl2_id',
+      'cat_id_lvl3'   => 'lvl3_id',
+    ];
+    return $map[$aliasKey] ?? null;
+  }
+
   /**
-   * Carga exclusiones por Nivel 1 desde un CSV con columnas: id_menu_nvl1,is_excluded
-   * Devuelve un array asociativo: [id_menu_nvl1 => 1]
+   * @param array<int,string> $headerNorm
+   * @return array<string,array<int,int>> canonical => list of column indexes
    */
-  private function load_l1_exclusions($path){
-    $out = [];
-    if (!is_string($path) || $path === '' || !file_exists($path)) return $out;
-    if (($fh = fopen($path, 'r')) === false) return $out;
-    $header = fgetcsv($fh, 0, $this->csv_delim, $this->csv_enclosure, $this->csv_escape);
-    if (!$header) { fclose($fh); return $out; }
-    $idx_id = $idx_ex = false;
-    foreach ($header as $i => $h) {
-      $h = strtolower(trim($h));
-      if ($h === 'id_menu_nvl1') $idx_id = $i;
-      if ($h === 'is_excluded') $idx_ex = $i;
+  private function build_column_index(array $headerNorm): array {
+    $index = [];
+    foreach ($this->headerSynonyms as $canonical => $variants) {
+      foreach ($variants as $variant) {
+        foreach ($headerNorm as $i => $header) {
+          if ($header === $variant) {
+            $index[$canonical][] = $i;
+          }
+        }
+      }
     }
-    if ($idx_id === false || $idx_ex === false) { fclose($fh); return $out; }
-    while (($row = fgetcsv($fh, 0, $this->csv_delim, $this->csv_enclosure, $this->csv_escape)) !== false) {
-      $id = isset($row[$idx_id]) ? trim((string)$row[$idx_id]) : '';
-      $ex = isset($row[$idx_ex]) ? (int)$row[$idx_ex] : 0;
-      if ($id !== '' && $ex === 1) $out[$id] = 1;
-    }
-    fclose($fh);
-    return $out;
+    return $index;
   }
 
-
-  /** Detecta el delimitador probable a partir de la primera línea */
-  private function detect_delimiter($file){
-    $candidates = [',',';',"\t",'|'];
-    $line = '';
-    $fh = fopen($file,'r');
-    if ($fh) { $line = fgets($fh); fclose($fh); }
-    if ($line === false) return ',';
-
-    $best=',';
-    $bestCount=-1;
-    foreach ($candidates as $d) {
-      $cnt = substr_count($line, $d);
-      if ($cnt > $bestCount) { $best = $d; $bestCount = $cnt; }
+  /**
+   * @param array<int,string> $headerNorm
+   * @return array<string,int> branch alias => column index
+   */
+  private function build_branch_index(array $headerNorm): array {
+    $branchIndex = [];
+    foreach ($this->branchSynonyms as $aliasKey => $variants) {
+      foreach ($variants as $variant) {
+        foreach ($headerNorm as $i => $header) {
+          if ($header === $variant) {
+            $branchIndex[$aliasKey] = $i;
+          }
+        }
+      }
     }
-    return $best ?: ',';
+    return $branchIndex;
   }
 
-  /** Normaliza nombres de encabezado: sin acentos, minúsculas, espacios colapsados */
-    private function norm_header($h) {
+  private function detect_delimiter(string $file): string {
+    $sample = file_get_contents($file, false, null, 0, 2048) ?: '';
+    $candidates = [',',';','\t','|'];
+    $best = ','; $bestCount = -1;
+    foreach ($candidates as $cand) {
+      $count = substr_count($sample, $cand);
+      if ($count > $bestCount) { $best = $cand; $bestCount = $count; }
+    }
+    return $best;
+  }
 
-    // 0) Corrección de mojibake típico (UTF-8 mal interpretado como Latin-1/Windows-1252)
-    //    Detecta secuencias como 'M-CM-' / 'Â' / 'Ã' / '¢' que delatan re-codificación.
-    if (preg_match('/M-CM-|Ã|Â|¢|­/u', $h)) {
-      // Intenta reinterpretar como Windows-1252 -> UTF-8
+  private function norm_header($header): string {
+    $h = (string)$header;
+    $h = preg_replace('/^\xEF\xBB\xBF/', '', $h); // BOM
+    if (preg_match('/M-CM-|Ã|Â/u', $h)) {
       $try = @iconv('WINDOWS-1252', 'UTF-8//TRANSLIT//IGNORE', $h);
       if ($try !== false) { $h = $try; }
-      // Limpia artefactos residuales tipo 'M-CM-' y similares
-      $h = str_replace(['M-CM-','MÂ','Â','Ã'], '', $h);
+      $h = str_replace(['M-CM-','Â','Ã'], '', $h);
     }
-
-    $h = (string)$h;
-    // 1) BOM
-    $h = preg_replace('/^\xEF\xBB\xBF/', '', $h);
-    // 2) quita comillas y signos típicos
-    $h = str_replace(['"', "'", '´', '`', '%', '$'], '', $h);
-    // 3) unicode -> ascii (quita acentos)
     if (class_exists('Transliterator')) {
-      $tr = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC;');
-      if ($tr) { $h = $tr->transliterate($h); }
+      $t = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC;');
+      if ($t) { $h = $t->transliterate($h); }
     } else {
       $h = iconv('UTF-8','ASCII//TRANSLIT//IGNORE',$h);
     }
-    // 4) minúsculas
-    $h = mb_strtolower($h,'UTF-8');
-    // 5) todo lo no [a-z0-9] -> "_"
+    $h = mb_strtolower($h ?: '', 'UTF-8');
     $h = preg_replace('/[^a-z0-9]+/u','_', $h);
-    // 6) colapsa y recorta "_"
     $h = preg_replace('/_+/', '_', $h);
-    $h = trim($h, '_');
-    return $h;
+    return trim($h, '_');
   }
 
+  /**
+   * @param array<int,string> $row
+   * @param array<string,array<int,int>> $columnIndex
+   * @param array<string,int> $branchIndex
+   * @return array<string,mixed>|null
+   */
+  private function build_canonical_row(array $row, array $columnIndex, array $branchIndex): ?array {
+    $sku = $this->first_non_empty($row, $columnIndex['sku'] ?? []);
+    if ($sku === null || $sku === '') {
+      $skuAlt = $this->first_non_empty($row, $columnIndex['model'] ?? []);
+      $sku = $skuAlt !== null ? $skuAlt : null;
+    }
+    if ($sku === null || $sku === '') {
+      return null;
+    }
 
-  /** Construye tabla de índices por clave canónica usando sinónimos declarados */
-  private function build_column_index(array $header_norm){
-    $map = [];
-    foreach ($this->syn as $canon => $aliases) {
-      $map[$canon] = null;
-      foreach ($aliases as $alias) {
-        // alias ya viene sin acentos y en minúsculas; matchea contra $header_norm
-        foreach ($header_norm as $i => $h) {
-          if ($h === $alias) { $map[$canon] = $i; break 2; }
+    $brand   = $this->first_non_empty($row, $columnIndex['brand'] ?? []);
+    $model   = $this->first_non_empty($row, $columnIndex['model'] ?? []);
+    $title   = $this->first_non_empty($row, $columnIndex['title'] ?? []);
+    $desc    = $this->first_non_empty($row, $columnIndex['description_html'] ?? []);
+    $image   = $this->first_non_empty($row, $columnIndex['image_url'] ?? []);
+
+    $cost    = $this->to_float($this->first_non_empty($row, $columnIndex['cost_usd'] ?? []));
+    $list    = $this->to_float($this->first_non_empty($row, $columnIndex['list_price_usd'] ?? []));
+    $special = $this->to_float($this->first_non_empty($row, $columnIndex['special_price_usd'] ?? []));
+    $fx      = $this->to_float($this->first_non_empty($row, $columnIndex['exchange_rate'] ?? []));
+    $weight  = $this->to_float($this->first_non_empty($row, $columnIndex['weight_kg'] ?? []));
+    $taxCode = $this->first_non_empty($row, $columnIndex['tax_code'] ?? []);
+
+    $lvl1    = $this->first_non_empty($row, $columnIndex['lvl1'] ?? []);
+    $lvl2    = $this->first_non_empty($row, $columnIndex['lvl2'] ?? []);
+    $lvl3    = $this->first_non_empty($row, $columnIndex['lvl3'] ?? []);
+    $lvl1_id = $this->first_non_empty($row, $columnIndex['lvl1_id'] ?? []);
+    $lvl2_id = $this->first_non_empty($row, $columnIndex['lvl2_id'] ?? []);
+    $lvl3_id = $this->first_non_empty($row, $columnIndex['lvl3_id'] ?? []);
+
+    $stockFromColumn = $this->to_int($this->first_non_empty($row, $columnIndex['stock_total'] ?? []));
+    $stockMainColumn = $this->to_int($this->first_non_empty($row, $columnIndex['stock_main'] ?? []));
+    $stockTjColumn   = $this->to_int($this->first_non_empty($row, $columnIndex['stock_tijuana'] ?? []));
+
+    $branchStocks = $this->extract_branch_stocks($row, $branchIndex);
+    if (!empty($branchStocks)) {
+      $stockTotal = array_sum($branchStocks);
+      $stockTj    = 0;
+      foreach ($branchStocks as $key => $qty) {
+        if (stripos($key, 'tijuana') !== false || stripos($key, 'tj') !== false) {
+          $stockTj += $qty;
         }
       }
+      $stockMain = max(0, $stockTotal - $stockTj);
+    } else {
+      $stockTotal = $stockFromColumn ?? 0;
+      $stockTj    = $stockTjColumn ?? 0;
+      $stockMain  = $stockMainColumn ?? max(0, $stockTotal - $stockTj);
+      if ($stockTotal === 0 && $stockFromColumn === null) {
+        $stockTotal = $stockMain + $stockTj;
+      }
     }
-    return $map;
+
+    $nameParts = [];
+    if ($brand) { $nameParts[] = $this->trim_text($brand); }
+    if ($model && strtolower($model) !== strtolower($sku)) { $nameParts[] = $this->trim_text($model); }
+    if ($title) { $nameParts[] = $this->trim_text($title); }
+    $name = trim(implode(' ', array_filter($nameParts)));
+    if ($name === '' && $sku) { $name = (string)$sku; }
+
+    $canonical = [
+      'sku'                => (string)$sku,
+      'supplier_sku'       => (string)$sku,
+      'brand'              => $brand !== null ? $this->trim_text($brand) : null,
+      'model'              => $model !== null ? $this->trim_text($model) : null,
+      'title'              => $title !== null ? $this->trim_text($title) : null,
+      'name'               => $name,
+      'description_html'   => $desc !== null ? (string)$desc : null,
+      'image_url'          => $image !== null ? (string)$image : null,
+      'cost_usd'           => $cost,
+      'list_price_usd'     => $list,
+      'special_price_usd'  => $special,
+      'exchange_rate'      => $fx,
+      'weight_kg'          => $weight,
+      'tax_code'           => $taxCode !== null ? (string)$taxCode : null,
+      'lvl1'               => $lvl1,
+      'lvl2'               => $lvl2,
+      'lvl3'               => $lvl3,
+      'lvl1_id'            => $lvl1_id,
+      'lvl2_id'            => $lvl2_id,
+      'lvl3_id'            => $lvl3_id,
+      'stock_total'        => $stockTotal,
+      'stock_main'         => $stockMain,
+      'stock_tijuana'      => $stockTj,
+      'stock_by_branch'    => !empty($branchStocks) ? $branchStocks : null,
+    ];
+
+    // Aliases temporales (mantener mientras se migra el pipeline)
+    $canonical['description']  = $canonical['description_html'];
+    $canonical['desc_html']    = $canonical['description_html'];
+    $canonical['image']        = $canonical['image_url'];
+    $canonical['img']          = $canonical['image_url'];
+    $canonical['price_usd']    = $canonical['cost_usd'];
+    $canonical['su_precio']    = $canonical['cost_usd'];
+    $canonical['price_list']   = $canonical['list_price_usd'];
+    $canonical['price_special']= $canonical['special_price_usd'];
+    $canonical['fx']           = $canonical['exchange_rate'];
+    $canonical['stock']        = $canonical['stock_total'];
+    $canonical['stock_a15']    = $canonical['stock_main'];
+    $canonical['stock_a15_tj'] = $canonical['stock_tijuana'];
+    $canonical['stock_others'] = $canonical['stock_main'];
+    if (!empty($branchStocks)) {
+      $canonical['stocks_by_branch'] = $branchStocks;
+      $canonical['stock_by_wh']      = $branchStocks;
+    }
+
+    return $canonical;
   }
 
-  /** Convierte a float robusto (acepta "1,234.56", "1.234,56", " 1 234,56 MXN", etc.) */
-  private function to_float($v){
-    if ($v === '' || $v === null) return null;
-    $s = trim((string)$v);
-
-    // quita símbolos/monedas/espacios NBSP
-    $s = str_replace(["\xC2\xA0",' ', 'USD','MXN','$'], '', $s);
-
-    // mantener solo dígitos, signos, coma, punto
-    $s = preg_replace('/[^0-9\-\.,]/', '', $s);
-
-    // si hay punto y coma, asumimos coma como miles -> quita comas
-    if (strpos($s, '.') !== false && strpos($s, ',') !== false) {
-      $s = str_replace(',', '', $s);
-    } else {
-      // si solo hay comas, conviértelas a punto decimal
-      if (strpos($s, ',') !== false) {
-        $s = str_replace(',', '.', $s);
+  private function first_non_empty(array $row, array $indexes){
+    foreach ($indexes as $idx) {
+      if (array_key_exists($idx, $row)) {
+        $value = trim((string)$row[$idx]);
+        if ($value !== '') { return $value; }
       }
     }
+    return null;
+  }
 
-    // colapsar múltiples puntos (dejar el último como decimal)
-    if (substr_count($s, '.') > 1) {
-      // elimina todos los puntos menos el último
-      $last = strrpos($s, '.');
-      $s = str_replace('.', '', $s);
-      $s = substr($s, 0, $last - (substr_count(substr($s,0,$last),'.'))) . '.' . substr($s, $last - (substr_count(substr($s,0,$last),'.')));
-      // fallback simple: si quedó raro, usa regex "primera parte" como entero
-      if (!preg_match('/^-?\d+(\.\d+)?$/', $s)) {
-        $s = preg_replace('/[^0-9\-]/','',$s);
-      }
-    }
-
-    if ($s === '' || $s === '-' || $s === '.' ) return null;
+  private function to_float($value): ?float {
+    if ($value === null) { return null; }
+    $s = trim((string)$value);
+    if ($s === '') { return null; }
+    $s = str_replace(['USD','MXN','$',"\xC2\xA0"],'', $s);
+    $s = str_replace(' ', '', $s);
+    $s = str_replace(',', '.', $s);
+    $s = preg_replace('/[^0-9\.-]/', '', $s);
+    if ($s === '' || $s === '-' || $s === '.') { return null; }
     return (float)$s;
   }
 
-  /** Convierte a int robusto (acepta "1,234", " 0023 ", etc.) */
-  private function to_int($v){
-    if ($v === '' || $v === null) return null;
-    $s = preg_replace('/[^0-9\-]/','', (string)$v);
-    if ($s === '' || $s === '-') return null;
+  private function to_int($value): ?int {
+    if ($value === null) { return null; }
+    $s = trim((string)$value);
+    if ($s === '') { return null; }
+    $s = preg_replace('/[^0-9\-]/','', $s);
+    if ($s === '' || $s === '-') { return null; }
     return (int)$s;
   }
 
-  /** Trim + colapso de espacios para strings de salida */
-  private function trim_collapse($s){
-    $s = trim((string)$s);
-    $s = preg_replace('/\s+/u',' ',$s);
-    return $s;
+  private function trim_text(?string $value): ?string {
+    if ($value === null) { return null; }
+    $t = trim($value);
+    $t = preg_replace('/\s+/u',' ', $t);
+    return $t === '' ? null : $t;
+  }
+
+  /**
+   * @param array<int,string> $row
+   * @param array<string,int> $branchIndex
+   * @return array<string,int>
+   */
+  private function extract_branch_stocks(array $row, array $branchIndex): array {
+    $out = [];
+    foreach ($branchIndex as $aliasKey => $idx) {
+      if (!array_key_exists($idx, $row)) { continue; }
+      $qty = $this->to_int($row[$idx]);
+      if ($qty === null) { continue; }
+      $out[$aliasKey] = max(0, $qty);
+    }
+    return $out;
+  }
+
+  /**
+   * @return array<string,bool>
+   */
+  private function load_l1_exclusions(string $path): array {
+    if (!file_exists($path)) { return []; }
+    $fh = fopen($path, 'r');
+    if (!$fh) { return []; }
+    $out = [];
+    while (($line = fgetcsv($fh)) !== false) {
+      $id = trim((string)($line[0] ?? ''));
+      if ($id !== '') { $out[$id] = true; }
+    }
+    fclose($fh);
+    return $out;
   }
 }
