@@ -1496,3 +1496,57 @@ final/imported.csv:1:sku,product_id,action,reason
 ### FIN SNAPSHOT
 Alias note listo (usa ccx-journal.sh)
 Snapshot STAGES listo. Stage→file mapeado (02..11). Proceder con fix en 03-validate.php y 06-products.php: invalid_lvl1 + missing_title_brand.
+
+## 2025-10-02 — 20:53 (America/Mexico_City)
+
+### Decisiones de Hoy
+1. **Estructura del equipo (3 personas + PO):**
+   - **Jorge Aguirre — Product Owner (PO):** define visión, prioridades, criterios de aceptación, valida UX y reglas de negocio (márgenes, multimoneda, multilenguaje). Go/No-Go de releases.
+   - **Leo — Cerebro Orquestador (Arquitecto / Tech Lead):** traduce la visión del PO a especificaciones técnicas, diseña arquitectura e integraciones, genera prompts/briefs para Codex, revisa PRs, seguridad y calidad.
+   - **Codex — Programador (Implementador):** escribe código, hace parches, pruebas unitarias básicas y entrega PRs con evidencias.
+
+2. **Flujo de trabajo (idea → producción):**
+   1) Brief del PO → Leo  
+   2) Especificación técnica de Leo (contratos, pruebas, riesgos) + **prompt** para Codex  
+   3) Implementación de Codex en rama dedicada + PR con checklist  
+   4) Revisión técnica de Leo (code review + seguridad + rendimiento)  
+   5) Validación de negocio por PO (criterios de aceptación)  
+   6) Merge, deploy y monitoreo post-release
+
+3. **RACI (resumen):**
+   - Priorización/visión: **PO A/R**, Leo C, Codex I  
+   - Arquitectura/interfaces: PO I, **Leo A/R**, Codex C  
+   - Prompts/briefs: PO I, **Leo A/R**, Codex C  
+   - Implementación/pruebas unitarias: PO I, Leo C, **Codex A/R**  
+   - Code review/seguridad: PO I, **Leo A/R**, Codex C  
+   - Validación negocio: **PO A/R**, Leo C, Codex I  
+   - Deploy & monitoreo: PO I, **Leo A/R**, Codex C
+
+4. **Definition of Done (DoD):**
+   - **General:** criterios del PO cumplidos, sin secretos en repo, logs controlados, doc breve (qué hace / cómo probar / cómo revertir).
+   - **Backend/Importador (02→11):** corre SAMPLE600 sin errores, artefactos esperados, pricing *lower_only* coherente (`_price`, `_regular_price`, `_sale_price`), reportes claros.
+   - **Frontend/Woo:** Lighthouse ≥90 (PDP/Home), selector de almacén con límite por stock del almacén activo, add-to-cart valida **precio y stock** vía API, i18n (ES/EN/KO/ZH) y multimoneda (MXN/USD).
+   - **QA/Datos:** smoke tests repetibles, casos límite (sin stock, cambio de precio, categorías faltantes) con evidencias.
+
+5. **Plantillas estandarizadas:**
+   - **Brief del PO:** objetivo, métricas, criterios de aceptación, dependencias, fecha objetivo/prioridad.
+   - **Especificación de Leo:** contexto, contrato de interfaz (inputs/outputs/validaciones), flujo, casos de prueba, riesgos/seguridad, entregables y DoD.
+   - **Prompt para Codex:** rol, tarea, rutas del repo, requisitos funcionales y técnicos, pruebas requeridas, salida esperada (PR con checklist), DoD.
+
+6. **Prompts críticos listos:**
+   - **PDP — Selector de almacén + límite de cantidad + total por almacenes + validación API antes de agregar al carrito.**
+   - **Importador — Pricing “lower_only” coherente y logs de decisión por SKU.**
+
+### Cadencia y comunicación
+- **Daily (async, 10 min):** ayer / hoy / bloqueos.  
+- **Weekly Review (45 min, lunes):** demo + decisiones del PO.  
+- **Release quincenal:** staging → smoke test → producción.  
+- **Canales:** tablero Kanban; un hilo por tarea.
+
+### Siguientes pasos
+1) Redactar **3 Job Descriptions** (TL/Front/QA-Data) listos para publicar.  
+2) Abrir **Sprint 1** con 6 tareas core: selector de almacén, validación add-to-cart, multimoneda, i18n, *lower_only*, panel de márgenes.  
+3) Preparar **paquete de prompts** para Codex de las 2 tareas críticas.
+
+---
+
