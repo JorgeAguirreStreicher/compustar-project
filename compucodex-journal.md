@@ -1,47 +1,83 @@
 ## 2025-10-02 02:00:07 UTC — RUN_ID=1759370407
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759370407
 - DRY_RUN: <nil>    LIMIT: <nil>
 - Source: <nil>
 - Final: imported=0  updated=0  skipped=0
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 Probando nota manual de diario
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 02:09:06 UTC — RUN_ID=1759370946
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759370946
 - DRY_RUN: <nil>    LIMIT: <nil>
 - Source: <nil>
 - Final: imported=0  updated=0  skipped=0
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 Probando nota manual de diario
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 02:18:55 UTC — RUN_ID=1759371535
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759371535
 - DRY_RUN: <nil>    LIMIT: <nil>
 - Source: <nil>
 - Final: imported=0  updated=0  skipped=0
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 Tu nota aquí
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 02:34:50 UTC — RUN_ID=1759372490
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759372490
 - DRY_RUN: <nil>    LIMIT: <nil>
 - Source: <nil>
 - Final: imported=0  updated=0  skipped=0
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 # Contexto base del proyecto (Compustar)
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## Repos y automatización
 - **GitHub**: org `JorgeAguirreStreicher`, repo `compustar-project`.
   - Workflows en `.github/workflows/`: `deploy.yml`, `db-backup.yml`, `sync-to-drive.yml`.
@@ -50,14 +86,23 @@ Tu nota aquí
   - Diario: `/home/compustar/knowledge/compucodex-journal.md` (+ hook automático desde launcher).
   - Autor recomendado del repo: `Compustar Ops (CCX) <aguirre@okdock.mx>`.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## CompuCodex (asistente)
 - Soporta: revisión de código, parches Bash/PHP/WP-CLI, generación de scripts “idempotentes”, verificación sintáctica, y plantillas de journaling.
 - Puede trabajar con el diario (script `ccx-journal.sh`) y con el repo de `knowledge`.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## Almacenamiento documental
 - **Google Drive** disponible (workflow `sync-to-drive.yml`).
 - Podemos subir artefactos (CSV finales, logs resumidos, changelogs) y snapshots del diario.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## Propósito de los stages (02→11)
 - `02-normalize`: normaliza filas del CSV fuente → `normalized.jsonl`.
 - `03-validate`: valida y filtra → `validated.jsonl`.
@@ -66,10 +111,16 @@ Tu nota aquí
 - `06-products`: crea/actualiza productos; escribe `final/imported.csv`, `updated.csv`, `skipped.csv`.
 - `07-media`, `08-offers`, `09-pricing`, `10-publish`, `11-report`: pasos posteriores de medios/ofertas/precios/publicación/reporte.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## Plugin Syscom (compu-import-lego)
 - Plugin de importación que implementa los stages y bridges PHP (compatibles con `wp eval-file`).
 - Ruta base: `$WP/wp-content/plugins/compu-import-lego/includes/stages/`.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## Lanzamiento unificado (cron/manuel)
 - **Launcher**: `/home/compustar/compu-cron-full_v3.5.sh` (symlink: `/home/compustar/launch.sh`).
 - Ejecuta 02→11, crea `RUN_DIR` y artefactos, llama a bridges con **WP-CLI** usando `--skip-themes --skip-plugins`.
@@ -84,52 +135,91 @@ Tu nota aquí
   - Logs: `$RUN_DIR/logs/*.log`
   - Finales: `$RUN_DIR/final/{imported,updated,skipped}.csv`
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## Cron
 - Objetivo: correr el launcher desde cron (usuario `compustar`) con `DRY_RUN=0`.
 - El cron debe exportar las mismas variables de entorno usadas en manual.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## Helpers
 - `run_stages_0206.sh`: helper para ejecutar 02–06 fuera del launcher (depuración controlada).
 - `ccx-journal.sh`: añade entradas al diario (hook post-run ya integrado en el launcher).
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## Política de operación
 - Siempre probar desde `launch.sh` aunque se esté depurando un stage puntual.
 - Cada sesión: registrar “Objetivo → Cambios → Resultados → Decisiones/Next” en el diario.
 - Ante fallos intermitentes: priorizar reproducibilidad usando el launcher + ENV fijo.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 02:42:54 UTC — RUN_ID=1759363194
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194
 - DRY_RUN: <nil>    LIMIT: <nil>
 - Source: <nil>
 - Final: imported=14488  updated=53  skipped=13996
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 Launcher como entrada única; corrida full OK y journal enganchado.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 02:43:16 UTC — RUN_ID=1759363194
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194
 - DRY_RUN: <nil>    LIMIT: <nil>
 - Source: <nil>
 - Final: imported=14488  updated=53  skipped=13996
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 Revisados finales; top skipped=zero_stock_all.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 02:47:25 UTC — RUN_ID=1759363194
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194
 - DRY_RUN: <nil>    LIMIT: <nil>
 - Source: <nil>
 - Final: imported=14488  updated=53  skipped=13996
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 ### Canvas 2025-10-02 · Resumen operativo
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 **Launcher unificado**
 - Usar siempre: `/home/compustar/launch.sh` → symlink a `compu-cron-full_v3.5.sh`.
 - Variables clave al lanzar:
@@ -140,6 +230,9 @@ Revisados finales; top skipped=zero_stock_all.
 - WP-CLI forzado con `--skip-themes --skip-plugins` y
   `WP_CLI_PHP_ARGS="-d display_errors=1 -d error_reporting=22527"` para reducir “Deprecated”.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 **Stages & artefactos**
 - 02 normalize → `normalized.jsonl`
 - 03 validate → `validated.jsonl`
@@ -148,12 +241,18 @@ Revisados finales; top skipped=zero_stock_all.
 - 06 products → `final/{imported,updated,skipped}.csv`
 - Regla de oro: si falla 06, verificar que **exista y sea legible** `resolved.jsonl`.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 **Roles/Permisos**
 - Evitamos sudo directo con `RUNPREFIX`:
   - si `id -un == compustar` ⇒ `env`
   - si no ⇒ `sudo -u compustar env`
 - Cuando WP-CLI se ejecuta vía sudo sin permisos, bloquea 05: corregido con `RUNPREFIX`.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 **Herramientas auxiliares**
 - `run_stages_0206.sh`: depuración 02→06, pero **siempre preferir** `launch.sh` para pruebas.
 - `ccx-journal.sh` + alias `note`: diario en `~/knowledge/compucodex-journal.md` con commit automático.
@@ -161,42 +260,72 @@ Revisados finales; top skipped=zero_stock_all.
   - `user.name = JorgeAguirreStreicher` (global)
   - repo `~/knowledge`: `user.name = Compustar Ops (CCX)`, `user.email = aguirre@okdock.mx`.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 **Hallazgos clave**
 - Inestabilidad venía de entornos parciales (variables no exportadas, set -u y nombres no definidos, sudo).
 - Estabilizado al centralizar **siempre** el arranque desde `launch.sh` con ENV explícito.
 - Corrida full OK (RUN_ID=1759363194): imported=14488, updated=53, skipped=13996 (principalmente `zero_stock_all`).
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 **Pendientes sugeridos**
 - (Opcional) Remote para `~/knowledge` y `git push`.
 - Cron real de producción llamando `launch.sh` con `DRY_RUN=0`.
 - Reporte automático de TOP skipped tras cada run.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 02:50:30 UTC — RUN_ID=1759363194
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194
 - DRY_RUN: <nil>    LIMIT: <nil>
 - Source: <nil>
 - Final: imported=14488  updated=53  skipped=13996
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 Nuevo canvas: retomando desde /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759363194. Launcher=/home/compustar/launch.sh, SOURCE_MASTER=/home/compustar/ProductosHora.csv.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 03:12:59 UTC — RUN_ID=1759374779
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759374779
 - DRY_RUN: 1    LIMIT: 0
 - Source: <nil>
 - Final: imported=0  updated=0  skipped=0
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 **DRY_RUN que sí deja CSVs + ENV mínimo para pruebas**
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 1) DRY_RUN=1 por defecto NO escribe final/*.csv en 05–11. Para ver imported/updated/skipped en pruebas:
    - FORCE_CSV=1
    - (opcional) PREVIEW_ONLY=1
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 2) ENV mínimo recomendado (pruebas rápidas):
    WP=/home/compustar/htdocs
    SOURCE_MASTER=/home/compustar/ProductosHora.csv
@@ -206,34 +335,58 @@ Nuevo canvas: retomando desde /home/compustar/htdocs/wp-content/uploads/compu-im
    STAGES="02 03 04 05 06"
    WP_CLI_PHP_ARGS="-d display_errors=1 -d error_reporting=22527"
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
    Lanzar: /home/compustar/launch.sh
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 3) Corrida “real”:
    DRY_RUN=0 SUBSET_ROWS=0 STAGES="02 03 04 05 06"
    /home/compustar/launch.sh
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 4) Ubicar resultados:
    RUNS="$WP/wp-content/uploads/compu-import"
    RUN_DIR=$(ls -1dt "$RUNS"/run-* | head -n1)
    Artefactos: normalized.jsonl, validated.jsonl, resolved.jsonl
    Finales:   final/{imported.csv,updated.csv,skipped.csv}
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 5) Notas de launcher v3.5:
    - Symlink: /home/compustar/launch.sh → /home/compustar/compu-cron-full_v3.5.sh
    - WP-CLI con --skip-themes --skip-plugins (parchado)
    - RUNPREFIX evita sudo si ya somos compustar
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 04:52:00 UTC — RUN_ID=1759379899
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 - WP: /home/compustar/htdocs
 - RUN_DIR: /home/compustar/htdocs/wp-content/uploads/compu-import/run-1759379899
 - DRY_RUN: 1    LIMIT: 0
 - Source: <nil>
 - Final: imported=0  updated=0  skipped=0
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Notas
 Ping: alias 'note' y script ccx-journal.sh operativos.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### SNAPSHOT · STAGES LIST
 (Directorio de stages y permisos)
 ```text
@@ -356,8 +509,14 @@ drwxrwxr-x 4 compustar compustar  4096 Oct  2 04:33 ..
 drwxrwsr-x 2 compustar compustar  4096 Sep 29 19:49 final
 drwxrwxr-x 2 compustar compustar  4096 Sep 30 04:56 logs
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ```
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### SNAPSHOT · STAGES GREP (patrones validate/products/s06/writers)
 ```text
 06-products.php.BAK.2025-10-01-183237:3: * Stage 06 - products (stable writer)
@@ -1317,8 +1476,14 @@ final/imported.csv:1:sku,product_id,action,reason
 06-products.php.BAK.2025-10-01-022548:126:      foreach (["title","titulo","título","nombre","producto","product name","name"] as $k) {
 06-products.php.BAK.2025-10-01-022548:163:s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ```
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### SNAPSHOT · LAUNCHER MAP (eval-file / bridges relevantes)
 ```bash
      1  #!/usr/bin/env bash
@@ -1492,19 +1657,31 @@ final/imported.csv:1:sku,product_id,action,reason
    169  echo -e "\n== FIN | RUN_ID=$RUN_ID =="
    170  export WP_CLI_PHP_ARGS="-d display_errors=1 -d error_reporting=22527"
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ```
 ### FIN SNAPSHOT
 Alias note listo (usa ccx-journal.sh)
 Snapshot STAGES listo. Stage→file mapeado (02..11). Proceder con fix en 03-validate.php y 06-products.php: invalid_lvl1 + missing_title_brand.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ## 2025-10-02 — 20:53 (America/Mexico_City)
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Decisiones de Hoy
 1. **Estructura del equipo (3 personas + PO):**
    - **Jorge Aguirre — Product Owner (PO):** define visión, prioridades, criterios de aceptación, valida UX y reglas de negocio (márgenes, multimoneda, multilenguaje). Go/No-Go de releases.
    - **Leo — Cerebro Orquestador (Arquitecto / Tech Lead):** traduce la visión del PO a especificaciones técnicas, diseña arquitectura e integraciones, genera prompts/briefs para Codex, revisa PRs, seguridad y calidad.
    - **Codex — Programador (Implementador):** escribe código, hace parches, pruebas unitarias básicas y entrega PRs con evidencias.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 2. **Flujo de trabajo (idea → producción):**
    1) Brief del PO → Leo  
    2) Especificación técnica de Leo (contratos, pruebas, riesgos) + **prompt** para Codex  
@@ -1513,6 +1690,9 @@ Snapshot STAGES listo. Stage→file mapeado (02..11). Proceder con fix en 03-val
    5) Validación de negocio por PO (criterios de aceptación)  
    6) Merge, deploy y monitoreo post-release
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 3. **RACI (resumen):**
    - Priorización/visión: **PO A/R**, Leo C, Codex I  
    - Arquitectura/interfaces: PO I, **Leo A/R**, Codex C  
@@ -1522,31 +1702,57 @@ Snapshot STAGES listo. Stage→file mapeado (02..11). Proceder con fix en 03-val
    - Validación negocio: **PO A/R**, Leo C, Codex I  
    - Deploy & monitoreo: PO I, **Leo A/R**, Codex C
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 4. **Definition of Done (DoD):**
    - **General:** criterios del PO cumplidos, sin secretos en repo, logs controlados, doc breve (qué hace / cómo probar / cómo revertir).
    - **Backend/Importador (02→11):** corre SAMPLE600 sin errores, artefactos esperados, pricing *lower_only* coherente (`_price`, `_regular_price`, `_sale_price`), reportes claros.
    - **Frontend/Woo:** Lighthouse ≥90 (PDP/Home), selector de almacén con límite por stock del almacén activo, add-to-cart valida **precio y stock** vía API, i18n (ES/EN/KO/ZH) y multimoneda (MXN/USD).
    - **QA/Datos:** smoke tests repetibles, casos límite (sin stock, cambio de precio, categorías faltantes) con evidencias.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 5. **Plantillas estandarizadas:**
    - **Brief del PO:** objetivo, métricas, criterios de aceptación, dependencias, fecha objetivo/prioridad.
    - **Especificación de Leo:** contexto, contrato de interfaz (inputs/outputs/validaciones), flujo, casos de prueba, riesgos/seguridad, entregables y DoD.
    - **Prompt para Codex:** rol, tarea, rutas del repo, requisitos funcionales y técnicos, pruebas requeridas, salida esperada (PR con checklist), DoD.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 6. **Prompts críticos listos:**
    - **PDP — Selector de almacén + límite de cantidad + total por almacenes + validación API antes de agregar al carrito.**
    - **Importador — Pricing “lower_only” coherente y logs de decisión por SKU.**
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Cadencia y comunicación
 - **Daily (async, 10 min):** ayer / hoy / bloqueos.  
 - **Weekly Review (45 min, lunes):** demo + decisiones del PO.  
 - **Release quincenal:** staging → smoke test → producción.  
 - **Canales:** tablero Kanban; un hilo por tarea.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ### Siguientes pasos
 1) Redactar **3 Job Descriptions** (TL/Front/QA-Data) listos para publicar.  
 2) Abrir **Sprint 1** con 6 tareas core: selector de almacén, validación add-to-cart, multimoneda, i18n, *lower_only*, panel de márgenes.  
 3) Preparar **paquete de prompts** para Codex de las 2 tareas críticas.
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
 ---
 
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+
+<!-- END:CCX_REPOS_SSH -->
+<!-- END:CCX_REPOS_SSH -->
+
+<!-- END:CCX_REPOS_SSH -->
