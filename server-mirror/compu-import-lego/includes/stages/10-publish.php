@@ -1,0 +1,26 @@
+<?php
+if (!defined("COMP_RUN_STAGE")) { return; }
+if (!defined('WP_CLI') || !WP_CLI) { return; }
+/**
+ * Stage 10: Publish (visibilidad/catalog)
+ */
+if (!function_exists('wc_get_products')) { fwrite(STDERR,"[10] WooCommerce no cargado\n"); return; }
+
+$RUN_DIR = getenv('RUN_DIR'); $DEBUG = getenv('DEBUG') ?: 0;
+if ($RUN_DIR) { @mkdir("$RUN_DIR/logs", 0775, true); $LOG=fopen("$RUN_DIR/logs/stage10.log","a"); }
+function SLOG10($m){ global $LOG,$DEBUG; if(!$LOG){return;} $l="[".date('Y-m-d H:i:s')."] $m\n"; fwrite($LOG,$l); if($DEBUG)echo $l; }
+
+SLOG10("== Stage 10: publish ==");
+$args = ['limit'=>-1, 'return'=>'ids', 'status'=>array('draft','private','publish')];
+$ids = wc_get_products($args);
+$pub=0;$kept=0;
+foreach($ids as $pid){
+  $p=wc_get_product($pid); if(!$p)continue;
+  $sku=$p->get_sku(); $price= floatval($p->get_regular_price());
+  if($sku && $price>0){
+    if($p->get_status()!=='publish'){ $p->set_status('publish'); }
+    if($p->get_catalog_visibility()!=='visible'){ $p->set_catalog_visibility('visible'); }
+    $p->save(); $pub++;
+  } else { $kept++; }
+}
+SLOG10("Publish: published=$pub kept=$kept");

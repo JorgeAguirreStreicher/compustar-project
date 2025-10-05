@@ -1,0 +1,8 @@
+--- includes/stages/06-products.php
++++ includes/stages/06-products.php
+@@ -1,3 +1,5 @@
++<?php /* CCX test: parche aplicado Ok */ ?>
++
+ PATCH
+ 
+ 

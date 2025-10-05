@@ -1,0 +1,106 @@
+<?php
+/**
+ * Stage 06 - products (safe writer)
+ * - Escribe final/*.csv sin tocar BD.
+ * - Log unificado en RUN_DIR/logs/stage06.log (incluye fatales).
+ */
+ob_start(); // silenciar cualquier salida accidental
+date_default_timezone_set('UTC');
+
+$runId   = getenv('RUN_ID') ?: 'unknown';
+$runDir  = getenv('RUN_DIR') ?: '';
+$debug   = (int)(getenv('DEBUG') ?: 1);
+$limit   = (int)(getenv('LIMIT') ?: 0);
+$offset  = (int)(getenv('OFFSET') ?: 0);
+$dryRun  = (int)(getenv('DRY_RUN') ?: 0);
+$inJsonl = getenv('INPUT_JSONL');
+
+if (!$runDir) $runDir = __DIR__;
+if (!is_dir("$runDir/logs")) @mkdir("$runDir/logs", 0775, true);
+
+// Loggea TODO en stage06.log
+ini_set('log_errors', '1');
+ini_set('display_errors', '0');
+ini_set('error_log', $runDir . '/logs/stage06.log');
+error_reporting(E_ALL);
+
+function s06_log($msg) {
+  global $runDir;
+  @file_put_contents("$runDir/logs/stage06.log", '['.date('Y-m-d H:i:s')."] stage06: $msg\n", FILE_APPEND);
+}
+register_shutdown_function(function () {
+  $e = error_get_last();
+  if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+    s06_log("FATAL_SHUTDOWN type={$e['type']} msg={$e['message']} file={$e['file']} line={$e['line']}");
+  }
+});
+
+if (!$inJsonl) $inJsonl = $runDir . '/resolved.jsonl';
+
+$finalDir = $runDir . '/final';
+if (!is_dir($finalDir)) { @mkdir($finalDir, 0775, true); @chmod($finalDir, 02775); }
+
+s06_log("START RUN_ID=$runId RUN_DIR=$runDir DRY_RUN=$dryRun LIMIT=$limit OFFSET=$offset INPUT=$inJsonl");
+
+// Bootstrap WP (opcional, solo si existe)
+if (!defined('ABSPATH')) {
+  $wpLoad = dirname(__DIR__, 6) . '/wp-load.php'; // …/wp-content/plugins/compu-import-lego/includes/stages → /wp-load.php
+  if (is_readable($wpLoad)) { require_once $wpLoad; s06_log("WP bootstrap OK ($wpLoad)"); }
+  else { s06_log("WP bootstrap SKIPPED (no legible: $wpLoad)"); }
+}
+
+// CSVs con encabezado — usar 5 parámetros para evitar “Deprecated”
+$csvHeader   = ['sku','product_id','action','reason'];
+$csvImported = fopen($finalDir . '/imported.csv', 'w');
+$csvUpdated  = fopen($finalDir . '/updated.csv',  'w');
+$csvSkipped  = fopen($finalDir . '/skipped.csv',  'w');
+if (!$csvImported || !$csvUpdated || !$csvSkipped) { s06_log("FATAL_CSV_OPEN finalDir=$finalDir"); ob_end_clean(); exit(1); }
+fputcsv($csvImported, $csvHeader, ",", "\"", "\\");
+fputcsv($csvUpdated,  $csvHeader, ",", "\"", "\\");
+fputcsv($csvSkipped,  $csvHeader, ",", "\"", "\\");
+fflush($csvImported); fflush($csvUpdated); fflush($csvSkipped);
+s06_log("OPENED_CSV imported,updated,skipped");
+
+// Input
+if (!is_readable($inJsonl)) { s06_log("FATAL_INPUT_NOT_READABLE $inJsonl"); fclose($csvImported); fclose($csvUpdated); fclose($csvSkipped); ob_end_clean(); exit(2); }
+$fh = fopen($inJsonl, 'r');
+if (!$fh) { s06_log("FATAL_INPUT_OPEN $inJsonl"); fclose($csvImported); fclose($csvUpdated); fclose($csvSkipped); ob_end_clean(); exit(3); }
+
+// Loop
+$lineNo=0; $processed=0; $imported=0; $updated=0; $skipped=0;
+while (!feof($fh)) {
+  $line = fgets($fh);
+  if ($line === false) break;
+  $lineNo++;
+  if ($offset && $lineNo <= $offset) continue;
+
+  $row = json_decode($line, true);
+  if (!is_array($row)) { $skipped++; fputcsv($csvSkipped, ["", "", "skipped", "invalid_json"], ",", "\"", "\\"); continue; }
+
+  $sku = "";
+  foreach (['sku','model','codigo','code'] as $k) { if (!empty($row[$k])) { $sku = trim((string)$row[$k]); break; } }
+  if ($sku === "") { $skipped++; fputcsv($csvSkipped, ["", "", "skipped", "missing_sku"], ",", "\"", "\\"); continue; }
+
+  $hasTitle = !empty($row['title']);
+  $hasBrand = !empty($row['brand']);
+
+  if ($hasTitle && $hasBrand) {
+    $imported++; fputcsv($csvImported, [$sku, "", "imported", "safe-simulated"], ",", "\"", "\\");
+  } elseif ($hasTitle && !$hasBrand) {
+    $updated++;  fputcsv($csvUpdated,  [$sku, "", "updated",  "missing_brand_simulated"], ",", "\"", "\\");
+  } else {
+    $skipped++;  fputcsv($csvSkipped,  [$sku, "", "skipped",  "missing_title_brand"], ",", "\"", "\\");
+  }
+
+  $processed++;
+  if ($limit && $processed >= $limit) break;
+}
+fclose($fh);
+
+// Cierre
+fflush($csvImported); fclose($csvImported);
+fflush($csvUpdated);  fclose($csvUpdated);
+fflush($csvSkipped);  fclose($csvSkipped);
+
+s06_log("DONE processed=$processed imported=$imported updated=$updated skipped=$skipped");
+ob_end_clean();

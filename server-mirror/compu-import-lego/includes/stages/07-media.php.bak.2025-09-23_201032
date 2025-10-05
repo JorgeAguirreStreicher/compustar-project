@@ -1,0 +1,71 @@
+<?php
+// Guard: solo ejecuta en WP-CLI (no en web)
+if (!defined('WP_CLI') || !WP_CLI) { return; }
+
+/**
+ * Compustar Import LEGO — Stage 07: Media (imagen destacada)
+ * Seguro para web: inerte fuera de WP-CLI
+ * Logs:   $RUN_DIR/logs/stage07.log
+ * Salida: $RUN_DIR/media/{sku}/... + media_downloaded.csv / media_errors.csv
+ */
+
+global $wpdb;
+
+/** Utils básicas **/
+$RUN_DIR = getenv('RUN_DIR');
+$DEBUG   = getenv('DEBUG') ?: 0;
+if (!$RUN_DIR) { fwrite(STDERR, "[07] Falta RUN_DIR en entorno\n"); return; }
+@mkdir("$RUN_DIR/logs", 0775, true);
+
+$LOG = fopen("$RUN_DIR/logs/stage07.log", "a");
+function SLOG07($m){ global $LOG,$DEBUG; $l="[".date('Y-m-d H:i:s')."] $m\n"; if($LOG)fwrite($LOG,$l); if($DEBUG)echo $l; }
+
+function compu_read_jsonl_07($path){
+  $fh=@fopen($path,"r"); if(!$fh) return array();
+  $rows=array(); while(($line=fgets($fh))!==false){ $t=trim($line); if($t==='')continue; $o=json_decode($t,true); if(is_array($o))$rows[]=$o; }
+  fclose($fh); return $rows;
+}
+
+SLOG07("== Stage 07: media ==");
+$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+$rows = $src ? compu_read_jsonl_07($src) : array();
+if (empty($rows)) { SLOG07("No hay datos en resolved/validated"); return; }
+
+if (!function_exists('wc_get_product_id_by_sku')) { SLOG07("WooCommerce no cargado; abortando stage 07"); return; }
+require_once ABSPATH . WPINC . '/class-http.php';
+
+$mediaDir = "$RUN_DIR/media"; @mkdir($mediaDir, 0775, true);
+$ok=fopen("$mediaDir/media_downloaded.csv","w");
+$er=fopen("$mediaDir/media_errors.csv","w");
+fputcsv($ok,["sku","url","file_path","size","http_status"]);
+fputcsv($er,["sku","url","error"]);
+
+$done=0; $fail=0;
+foreach($rows as $r){
+  $sku = $r['sku'] ?? ($r['model'] ?? null);
+  if(!$sku) continue;
+  $url = $r['image'] ?? ($r['image_url'] ?? ($r['img'] ?? null));
+  if(!$url) continue;
+
+  $pid = wc_get_product_id_by_sku($sku);
+  if(!$pid) { fputcsv($er,[$sku,$url,"product_not_found"]); $fail++; continue; }
+
+  $resp = wp_remote_get($url, ['timeout'=>20]);
+  if(is_wp_error($resp)){ fputcsv($er,[$sku,$url,$resp->get_error_message()]); $fail++; continue; }
+  $code = wp_remote_retrieve_response_code($resp);
+  $body = wp_remote_retrieve_body($resp);
+  if($code!=200 || empty($body)){ fputcsv($er,[$sku,$url,"HTTP $code"]); $fail++; continue; }
+
+  $skuDir="$mediaDir/".sanitize_title($sku); @mkdir($skuDir,0775,true);
+  $ext = pathinfo(parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION) ?: "jpg";
+  $fp  = "$skuDir/{$sku}.{$ext}"; file_put_contents($fp,$body);
+
+  if (!function_exists('media_sideload_image')) { require_once ABSPATH . 'wp-admin/includes/media.php'; require_once ABSPATH . 'wp-admin/includes/file.php'; require_once ABSPATH . 'wp-admin/includes/image.php'; }
+  $id  = media_sideload_image($url, $pid, null, 'id');
+  if(is_wp_error($id)){ fputcsv($er,[$sku,$url,"sideload_error"]); $fail++; continue; }
+  set_post_thumbnail($pid, $id);
+
+  fputcsv($ok,[$sku,$url,$fp,filesize($fp)?:0,$code]);
+  $done++; SLOG07("OK $sku thumbnail set");
+}
+SLOG07("Stage 07 done: ok=$done fail=$fail");

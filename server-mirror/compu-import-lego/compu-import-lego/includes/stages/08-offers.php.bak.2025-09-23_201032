@@ -1,0 +1,46 @@
+<?php
+if (!defined('WP_CLI') || !WP_CLI) { return; }
+/**
+ * Stage 08: Offers (wp_compu_offers upsert)
+ */
+global $wpdb;
+
+$RUN_DIR = getenv('RUN_DIR'); $DEBUG = getenv('DEBUG') ?: 0;
+if (!$RUN_DIR) { fwrite(STDERR, "[08] Falta RUN_DIR\n"); return; }
+@mkdir("$RUN_DIR/logs", 0775, true); @mkdir("$RUN_DIR/final", 0775, true);
+$LOG = fopen("$RUN_DIR/logs/stage08.log", "a");
+function SLOG08($m){ global $LOG,$DEBUG; $l="[".date('Y-m-d H:i:s')."] $m\n"; if($LOG)fwrite($LOG,$l); if($DEBUG)echo $l; }
+function compu_read_jsonl_08($p){ $fh=@fopen($p,"r"); if(!$fh)return[]; $a=[]; while(($l=fgets($fh))!==false){ $t=trim($l); if($t==='')continue; $o=json_decode($t,true); if(is_array($o))$a[]=$o; } fclose($fh); return $a; }
+
+SLOG08("== Stage 08: offers ==");
+$src = file_exists("$RUN_DIR/resolved.jsonl") ? "$RUN_DIR/resolved.jsonl" : "$RUN_DIR/validated.jsonl";
+$rows = $src ? compu_read_jsonl_08($src) : array();
+if (empty($rows)) { SLOG08("No hay datos"); return; }
+
+$table = $wpdb->prefix."compu_offers"; // ESQUEMA REAL: dime si cambia
+$out=fopen("$RUN_DIR/final/offers_upserted.csv","w");
+fputcsv($out,["sku","stock","cost_usd","fx","action"]);
+
+$ins=0;$upd=0;$unch=0;$err=0;
+foreach($rows as $r){
+  $sku = $r['sku'] ?? ($r['model'] ?? null); if(!$sku){$err++;continue;}
+  $pid = (function_exists('wc_get_product_id_by_sku')?wc_get_product_id_by_sku($sku):0); if(!$pid){/*permitimos upsert sin PID*/}
+
+  $cost = null; foreach(['Su Precio','su_precio','cost_base','precio_usd'] as $k){ if(isset($r[$k]) && is_numeric($r[$k])){$cost=floatval($r[$k]);break;} }
+  $fx   = null; foreach(['Tipo de Cambio','tipo_cambio','exchange_rate'] as $k){ if(isset($r[$k]) && is_numeric($r[$k])){$fx=floatval($r[$k]);break;} }
+  $stk  = null; foreach(['Existencias','existencias','stock'] as $k){ if(isset($r[$k]) && is_numeric($r[$k])){$stk=intval($r[$k]);break;} }
+  if($cost===null)$cost=0.0; if($fx===null)$fx=0.0; if($stk===null)$stk=0;
+
+  $now = current_time('mysql');
+  $row = $wpdb->get_row($wpdb->prepare("SELECT id,cost_base,exchange_rate,stock FROM $table WHERE sku=%s",$sku),ARRAY_A);
+  if($row){
+    $changed = (abs(floatval($row['cost_base'])-$cost)>0.0001) || (abs(floatval($row['exchange_rate'])-$fx)>0.0001) || (intval($row['stock'])!=$stk);
+    $ok = $wpdb->update($table,['cost_base'=>$cost,'exchange_rate'=>$fx,'stock'=>$stk,'updated_at'=>$now],['sku'=>$sku],['%f','%f','%d','%s'],['%s']);
+    if($ok===false){$err++;$act='error';} else { if($changed){$upd++;$act='updated';} else {$unch++;$act='unchanged';} }
+  }else{
+    $ok = $wpdb->insert($table,['sku'=>$sku,'cost_base'=>$cost,'exchange_rate'=>$fx,'stock'=>$stk,'created_at'=>$now,'updated_at'=>$now],['%s','%f','%f','%d','%s','%s']);
+    if($ok===false){$err++;$act='error';} else {$ins++;$act='inserted';}
+  }
+  fputcsv($out,[$sku,$stk,$cost,$fx,$act]);
+}
+SLOG08("Insertados=$ins Actualizados=$upd SinCambio=$unch Errores=$err");

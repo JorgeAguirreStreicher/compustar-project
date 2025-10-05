@@ -1,0 +1,140 @@
+<?php declare(strict_types=1);
+if (!defined('ABSPATH')) { exit; }
+if (!class_exists('Compu_Stage_Offers')) {
+class Compu_Stage_Offers {
+  public function run($args){
+    global $wpdb;
+    $run_id = compu_import_run_id_from_arg($args['run-id'] ?? 'last');
+    $source = $args['source'] ?? 'syscom';
+    $limit  = intval($args['limit'] ?? 0);
+    $minStock = intval($args['min-stock'] ?? 1);
+    $onlyExisting = !empty($args['only-existing']);
+    $onlyNew      = !empty($args['only-new']);
+
+    if ($onlyExisting && $onlyNew) { \WP_CLI::error('--only-existing y --only-new no pueden usarse juntos'); }
+
+    $base = compu_import_get_base_dir();
+    $dir  = trailingslashit($base).'run-'.$run_id;
+    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+    if (!file_exists($src)) { \WP_CLI::error("No existe {$src}"); }
+
+    // Config por defecto (overridable por define())
+    if (!defined('WAREHOUSE_15_ID'))   define('WAREHOUSE_15_ID', 15);
+    if (!defined('WAREHOUSE_15_CODE')) define('WAREHOUSE_15_CODE', 'ALM15-AGR');
+    if (!defined('WAREHOUSE_TIJ_ID'))  define('WAREHOUSE_TIJ_ID', 151);
+    if (!defined('WAREHOUSE_TIJ_CODE'))define('WAREHOUSE_TIJ_CODE','ALM15-TIJ');
+
+    $fh = fopen($src,'r');
+    if (!$fh) { \WP_CLI::error('No se pudo abrir JSONL de entrada'); }
+
+    $ok=0; $err=0; $skipped_unmapped=0; $skipped_nostock=0; $skipped_excluded=0; $skipped_mode=0;
+
+    while (!feof($fh)) {
+      $line = fgets($fh);
+      if ($line === false) break;
+      $line = trim($line);
+      if ($line === '') continue;
+      $r = json_decode($line, true);
+      if (!is_array($r)) { $skipped_mode++; continue; }
+
+      $sku = $r['sku'] ?? '';
+      if ($sku === '') { $skipped_mode++; continue; }
+
+      // Mapeo: si viene "unmapped" o sin lvl3_id, podemos saltar (cuando el archivo es validated.jsonl puede no traer mapeo)
+      if (isset($r['lvl3_id']) && $r['lvl3_id'] === null) { $skipped_unmapped++; continue; }
+
+      // Resolver post_id por SKU
+      $post_id = 0;
+      if (function_exists('wc_get_product_id_by_sku')) { $post_id = intval(wc_get_product_id_by_sku($sku)); }
+      if (!$post_id && function_exists('compu_import_find_product_id_by_sku')) { $post_id = intval(compu_import_find_product_id_by_sku($sku)); }
+
+      if ($onlyExisting && !$post_id) { $skipped_mode++; continue; }
+      if ($onlyNew && $post_id) { $skipped_mode++; continue; }
+      if (!$post_id) { $skipped_mode++; continue; } // por simplicidad, solo upsert a productos existentes
+
+      // Stocks derivados (desde normalize)
+      $stock_tij  = isset($r['stock_tijuana']) ? intval($r['stock_tijuana']) : null;
+      $stock_oth  = isset($r['stock_others'])  ? intval($r['stock_others'])  : null;
+      $stock_base = isset($r['stock']) ? intval($r['stock']) : null;
+
+      if ($stock_tij === null && $stock_oth === null) {
+        // CSV sin sucursales: asumimos todo en "otros"
+        $stock_tij = 0;
+        $stock_oth = max(0, intval($stock_base));
+      } else {
+        if ($stock_tij === null) $stock_tij = 0;
+        if ($stock_oth === null) $stock_oth = 0;
+      }
+
+      // Filtro por stock mínimo (si ambos < minStock, saltar)
+      $stock_sum = $stock_tij + $stock_oth;
+      if ($stock_sum < $minStock) { $skipped_nostock++; continue; }
+
+      // Precios base
+      $price_usd = isset($r['price_usd']) ? floatval($r['price_usd']) : null;
+      $fx        = isset($r['fx']) ? floatval($r['fx']) : null;
+
+      // Cálculo de oferta (si existe helper del proyecto, úsalo)
+      $calc_tij = $calc_oth = [
+        'cost_base_usd' => $price_usd,
+        'exchange_rate' => $fx,
+      ];
+      if (function_exists('compu_calc_offer')) {
+        $calc_tij = compu_calc_offer($price_usd, $fx, $r['margin_rule_id'] ?? null);
+        $calc_oth = $calc_tij;
+      }
+
+      // 1) TIJUANA (almacén propio)
+      $ok_tij = false;
+      if ($stock_tij > 0 || $minStock <= 0) {
+        $payload_tij = array_merge($calc_tij, [
+          'warehouse_id'   => WAREHOUSE_TIJ_ID,
+          'warehouse_code' => WAREHOUSE_TIJ_CODE,
+          'stock'          => max(0, intval($stock_tij)),
+          'source'         => $source,
+          'sku'            => $sku,
+        ]);
+        if (function_exists('compu_offers_upsert')) {
+          $ok_tij = compu_offers_upsert($post_id, $source, $payload_tij);
+        } else {
+          compu_import_log($run_id,'offers','error','Falta compu_offers_upsert()', $payload_tij, $sku);
+        }
+      }
+
+      // 2) ALM 15 (agregado de todas menos Tijuana)
+      $ok_oth = false;
+      if ($stock_oth > 0 || $minStock <= 0) {
+        $payload_oth = array_merge($calc_oth, [
+          'warehouse_id'   => WAREHOUSE_15_ID,
+          'warehouse_code' => WAREHOUSE_15_CODE,
+          'stock'          => max(0, intval($stock_oth)),
+          'source'         => $source,
+          'sku'            => $sku,
+        ]);
+        if (function_exists('compu_offers_upsert')) {
+          $ok_oth = compu_offers_upsert($post_id, $source, $payload_oth);
+        } else {
+          compu_import_log($run_id,'offers','error','Falta compu_offers_upsert()', $payload_oth, $sku);
+        }
+      }
+
+      if ($ok_tij || $ok_oth) { $ok++; }
+      else { $err++; compu_import_log($run_id,'offers','error','Oferta upsert falló', ['tijuana'=>$ok_tij,'others'=>$ok_oth], $sku); }
+
+      if ($limit && $ok >= $limit) break;
+    }
+    fclose($fh);
+
+    compu_import_log($run_id,'offers','info','Ofertas procesadas',[
+      'ok'=>$ok,
+      'err'=>$err,
+      'skipped_unmapped'=>$skipped_unmapped,
+      'skipped_nostock'=>$skipped_nostock,
+      'skipped_excluded'=>$skipped_excluded,
+      'skipped_mode'=>$skipped_mode
+    ]);
+    \WP_CLI::success("Run {$run_id}: offers OK={$ok} ERR={$err} SKIP_UNMAPPED={$skipped_unmapped} SKIP_NOSTOCK={$skipped_nostock} SKIP_EXCLUDED={$skipped_excluded} SKIP_MODE={$skipped_mode}");
+  }
+}
+
+}

@@ -1,0 +1,45 @@
+<?php declare(strict_types=1);
+if (!defined('ABSPATH')) { exit; }
+if (!class_exists('Compu_Stage_Media')) {
+class Compu_Stage_Media {
+  public function run($args){
+    $run_id = compu_import_run_id_from_arg($args['run-id'] ?? 'last');
+    $limit  = intval($args['limit'] ?? 0);
+    $minStock = intval($args['min-stock'] ?? 1);
+    $onlyExisting = !empty($args['only-existing']);
+    $onlyNew      = !empty($args['only-new']);
+
+    $base = compu_import_get_base_dir();
+    $dir  = trailingslashit($base).'run-'.$run_id;
+    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+
+    $rows = compu_import_read_jsonl($src);
+    $ok=0; $err=0; $skipped_unmapped=0; $skipped_nostock=0; $skipped_mode=0; $skipped_excluded=0;
+    foreach ($rows as $r){
+      if (!empty($r['is_excluded'])) { $skipped_excluded++; continue; }
+      if (!empty($r['unmapped']) || empty($r['category_id'])) { $skipped_unmapped++; continue; }
+      $st = isset($r['stock']) ? (int)$r['stock'] : 0; if ($st < $minStock) { $skipped_nostock++; continue; }
+
+      $sku = $r['sku'] ?: ($r['supplier_sku'] ?? null); if (!$sku) continue;
+      $pid = wc_get_product_id_by_sku($sku);
+      if ($onlyExisting && !$pid) { $skipped_mode++; continue; }
+      if ($onlyNew && $pid)      { $skipped_mode++; continue; }
+      if (!$pid) continue;
+
+      $img = $r['img'] ?? $r['image'] ?? $r['image_url'] ?? null;
+      if ($img){
+        $aid = compu_lego_download_and_set_thumbnail($pid, $img);
+        if ($aid){ $ok++; compu_import_log($run_id,'media','info','Imagen asignada',['post_id'=>$pid,'attachment_id'=>$aid],$sku); }
+        else { $err++; compu_import_log($run_id,'media','error','No se pudo asignar imagen',$r,$sku); }
+      }
+      if ($limit && $ok >= $limit) break;
+    }
+    compu_import_log($run_id,'media','info','Media procesada',[
+      'ok'=>$ok,'err'=>$err,'skipped_unmapped'=>$skipped_unmapped,'skipped_nostock'=>$skipped_nostock,'skipped_excluded'=>$skipped_excluded,'skipped_mode'=>$skipped_mode,
+      'min_stock'=>$minStock,'limit_valid'=>$limit,'only_existing'=>$onlyExisting?1:0,'only_new'=>$onlyNew?1:0
+    ]);
+    \WP_CLI::success("Run {$run_id}: media OK={$ok} ERR={$err} SKIP_UNMAPPED={$skipped_unmapped} SKIP_NOSTOCK={$skipped_nostock} SKIP_EXCLUDED={$skipped_excluded} SKIP_MODE={$skipped_mode}");
+  }
+}
+}

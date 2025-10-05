@@ -1,0 +1,26 @@
+<?php
+// CompuStar · helpers de media (idempotente)
+if (!function_exists('compu_image_from_row')) {
+  /**
+   * Retorna la primera URL válida de imagen desde la fila $r.
+   * Revisa: image, image_url, img, "Imagen Principal", URL_IMAGEN, img_url, images[0], gallery_urls[0].
+   */
+  function compu_image_from_row(array $r): ?string {
+    $cands = [];
+    foreach (['image','image_url','img','Imagen Principal','URL_IMAGEN','img_url'] as $k) {
+      if (isset($r[$k]) && $r[$k] !== '') $cands[] = (string)$r[$k];
+    }
+    if (!empty($r['images']) && is_array($r['images']) && !empty($r['images'][0])) {
+      $cands[] = (string)$r['images'][0];
+    }
+    if (!empty($r['gallery_urls']) && is_array($r['gallery_urls']) && !empty($r['gallery_urls'][0])) {
+      $cands[] = (string)$r['gallery_urls'][0];
+    }
+    $re = '~^(https?|ftp)://.+\.(jpg|jpeg|png|webp|gif)(\?.*)?$~i';
+    foreach ($cands as $u) {
+      $u = trim($u);
+      if ($u !== '' && preg_match($re, $u)) return $u;
+    }
+    return null;
+  }
+}

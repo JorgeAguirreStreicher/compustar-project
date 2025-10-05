@@ -1,0 +1,154 @@
+<?php 
+if (!defined('ABSPATH')) { exit; }
+/**
+ * Stage 11 — Report
+ * Genera un resumen del run: conteos por stage/level desde la tabla de logs,
+ * resumen de unmapped.csv, top de errores y advertencias, y (opcional) envía correo.
+ * No modifica productos ni tablas de ofertas/precios.
+ */
+if (!class_exists('Compu_Stage_Report')) {
+class Compu_Stage_Report {
+  public function run($args){
+    global $wpdb;
+    $run_id = compu_import_run_id_from_arg($args['run-id'] ?? 'last');
+
+    $base = compu_import_get_base_dir();
+    $dir  = trailingslashit($base).'run-'.$run_id; compu_import_mkdir($dir);
+
+    // === 1) Resumen de logs por stage/level ===
+    $log_table = $wpdb->prefix.'compu_lego_log_items'; // tabla de logs de stages
+    $rows = $wpdb->get_results($wpdb->prepare(
+      "SELECT stage, level, COUNT(*) AS c
+       FROM {$log_table}
+       WHERE run_id=%d
+       GROUP BY stage, level
+       ORDER BY stage, level", $run_id
+    ), ARRAY_A);
+
+    $summary = [];
+    foreach ((array)$rows as $r){
+      $stage = (string)$r['stage'];
+      $level = (string)$r['level'];
+      $c     = intval($r['c']);
+      if (!isset($summary[$stage])) $summary[$stage] = ['info'=>0,'warn'=>0,'error'=>0,'other'=>0];
+      if (isset($summary[$stage][$level])) $summary[$stage][$level] += $c;
+      else $summary[$stage]['other'] += $c;
+    }
+
+    // === 2) Top errores/advertencias (hasta 50) ===
+    $top = $wpdb->get_results($wpdb->prepare(
+      "SELECT stage, level, message, sku, created_at
+       FROM {$log_table}
+       WHERE run_id=%d AND (level='error' OR level='warn')
+       ORDER BY created_at DESC
+       LIMIT 50", $run_id
+    ), ARRAY_A);
+
+    // === 3) Unmapped.csv resumen ===
+    $unmapped_csv = trailingslashit($dir).'unmapped.csv';
+    $unmapped_count = 0;
+    if (file_exists($unmapped_csv)) {
+      // Contar líneas (excluyendo cabecera si existe)
+      $fh = fopen($unmapped_csv, 'r');
+      if ($fh) {
+        $first = true;
+        while (($line = fgets($fh)) !== false) {
+          if ($first && stripos($line, 'sku') !== false && stripos($line, 'lvl3') !== false) { $first = false; continue; }
+          $unmapped_count++;
+        }
+        fclose($fh);
+      }
+    }
+
+    // === 4) Construir reporte (JSON + Markdown) ===
+    $report = [
+      'run_id' => $run_id,
+      'generated_at' => compu_import_now(),
+      'summary_by_stage' => $summary,
+      'top_issues' => $top,
+      'unmapped' => [
+        'path' => file_exists($unmapped_csv) ? $unmapped_csv : null,
+        'count' => $unmapped_count
+      ]
+    ];
+
+    $json_path = $dir.'report.json';
+    file_put_contents($json_path, json_encode($report, JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT));
+
+    // Markdown amigable
+    $md = "# Reporte de run {$run_id}\n\n";
+    $md .= "Generado: `{$report['generated_at']}`\n\n";
+    $md .= "## Resumen por stage\n\n";
+    foreach ($summary as $st=>$counts){
+      $md .= "- **{$st}** — info: {$counts['info']}, warn: {$counts['warn']}, error: {$counts['error']}\n";
+    }
+    $md .= "\n## Unmapped.csv\n\n";
+    if ($report['unmapped']['path']) {
+      $md .= "- Archivo: `{$report['unmapped']['path']}`\n- Registros: **{$report['unmapped']['count']}**\n";
+    } else {
+      $md .= "- No se encontró `unmapped.csv`\n";
+    }
+    if (!empty($top)){
+      $md .= "\n## Últimos errores/advertencias (máx. 50)\n\n";
+      foreach ($top as $i){
+        $when = isset($i['created_at']) ? $i['created_at'] : '';
+        $sku  = isset($i['sku']) ? $i['sku'] : '';
+        $msg  = isset($i['message']) ? $i['message'] : '';
+        $md  .= "- {$when} · **{$i['stage']} / {$i['level']}** · SKU: `{$sku}` — {$msg}\n";
+      }
+    }
+
+    $md_path = $dir.'report.md';
+    file_put_contents($md_path, $md);
+
+    compu_import_log($run_id,'report','info','Reporte generado',[
+      'json'=>$json_path,'md'=>$md_path,'unmapped_count'=>$unmapped_count
+    ]);
+
+    
+    // === 5) Email (solo resumen en cuerpo; sin adjuntos) ===
+    $email_to = $args['email-to'] ?? get_option('admin_email');
+    if ($email_to){
+      // Totales de incidencias
+      $total_errors = 0; $total_warns = 0;
+      foreach ($summary as $st=>$counts){ $total_errors += intval($counts['error']); $total_warns += intval($counts['warn']); }
+
+      $subject = sprintf('[Compustar] Run %d — Incidencias (errors:%d, warn:%d, unmapped:%d)', $run_id, $total_errors, $total_warns, $unmapped_count);
+
+      $body  = "Resumen del run {$run_id}\n";
+      $body .= "Generado: {$report['generated_at']}\n\n";
+      $body .= "== Resumen por stage ==\n";
+      foreach ($summary as $st=>$counts){
+        $body .= sprintf("- %s — info:%d warn:%d error:%d\n", $st, $counts['info'], $counts['warn'], $counts['error']);
+      }
+      $body .= "\n== Unmapped ==\n";
+      $body .= sprintf("Registros sin categoría (L3 no asignado): %d\n", $unmapped_count);
+
+      if (!empty($top)){
+        $body .= "\n== Últimos errores/advertencias (máx. 50) ==\n";
+        $i = 0;
+        foreach ($top as $row){
+          if ($i++ >= 50) break;
+          $when = isset($row['created_at']) ? $row['created_at'] : '';
+          $sku  = isset($row['sku']) ? $row['sku'] : '';
+          $msg  = isset($row['message']) ? $row['message'] : '';
+          $body .= sprintf("- %s · %s/%s · SKU:%s — %s\n", $when, $row['stage'], $row['level'], $sku, $msg);
+        }
+      }
+
+      $headers = ['Content-Type: text/plain; charset=UTF-8'];
+      $sent = wp_mail($email_to, $subject, $body, $headers);
+      if ($sent){
+        compu_import_log($run_id,'report','info','Correo de incidencias enviado',[ 'to'=>$email_to, 'errors'=>$total_errors, 'warn'=>$total_warns, 'unmapped'=>$unmapped_count ]);
+      } else {
+        compu_import_log($run_id,'report','error','Fallo al enviar correo de incidencias',[ 'to'=>$email_to ]);
+      }
+    } else {
+      compu_import_log($run_id,'report','info','Sin email-to especificado; no se envía reporte');
+    }
+
+    \WP_CLI::success("Run {$run_id}: reporte -> {$json_path} | {$md_path}");
+  }
+}
+
+}

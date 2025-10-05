@@ -1,0 +1,118 @@
+[200~<?<?php
+require_once dirname(__DIR__) . "/compu-resolve-normalize.php";
+if (!defined('ABSPATH')) { exit; }
+
+class Compu_Stage_Resolve_Map {
+  public function run($args){
+    $run_id = compu_import_run_id_from_arg(isset($args['run-id']) ? $args['run-id'] : 'last');
+    $base = compu_import_get_base_dir();
+    $dir  = trailingslashit($base) . 'run-' . $run_id;
+    $src  = $dir . '/validated.jsonl';
+    if (!file_exists($src)) \WP_CLI::error('Falta validated.jsonl; corre validate.');
+
+    $rows = compu_import_read_jsonl($src);
+
+    // CSV params (evita deprecations en PHP 8.2/8.3)
+    $sep = ','; $enc = '"'; $esc = '\\';
+
+    // Cargar mapping CSV
+    $map_file = defined('COMPU_IMPORT_MAPPING_CSV') ? COMPU_IMPORT_MAPPING_CSV : null;
+    $mapping = [];
+    if ($map_file && file_exists($map_file)) {
+      if (($fh = fopen($map_file, 'r'))) {
+        $header = fgetcsv($fh, 0, $sep, $enc, $esc);
+
+        // Índices esperados en el CSV de mapeo
+        $idx = ['lvl3_id'=>null,'cat'=>null,'subcat'=>null,'margin'=>null,'exclude'=>null];
+
+        foreach ($header as $i => $h) {
+          $k = strtolower(remove_accents(trim((string)$h)));
+          if (strpos($k,'lvl3') !== false || strpos($k,'id menu nvl 3') !== false) $idx['lvl3_id'] = $i;
+          if (strpos($k,'category_id') !== false || strpos($k,'categoria_id') !== false) $idx['cat'] = $i;
+          if (strpos($k,'subcategory_id') !== false || strpos($k,'subcategoria_id') !== false) $idx['subcat'] = $i;
+          if (strpos($k,'margin') !== false) $idx['margin'] = $i;
+          if (strpos($k,'excl')  !== false || strpos($k,'omit') !== false) $idx['exclude'] = $i;
+        }
+
+        while (($r = fgetcsv($fh, 0, $sep, $enc, $esc)) !== false) {
+          $key = $idx['lvl3_id'] !== null ? trim((string)$r[$idx['lvl3_id']]) : null;
+          if ($key === null || $key === '') continue;
+
+          $cat    = $idx['cat']    !== null ? trim((string)$r[$idx['cat']])    : null;
+          $subcat = $idx['subcat'] !== null ? trim((string)$r[$idx['subcat']]) : null;
+          $margin = $idx['margin'] !== null ? trim((string)$r[$idx['margin']]) : null;
+          $excv   = $idx['exclude']!== null ? trim((string)$r[$idx['exclude']]) : '';
+
+          // Normaliza "exclude": 1/true/yes/x -> 1; vacío o 0 -> 0
+          $is_excluded = 0;
+          if ($excv !== '') {
+            $v = strtolower($excv);
+            if (in_array($v, ['1','true','yes','y','x','si','sí'], true)) $is_excluded = 1;
+          }
+
+          $mapping[$key] = [
+            'category_id'    => $cat ?: null,
+            'subcategory_id' => $subcat ?: null,
+            'margin_rule_id' => $margin ?: null,
+            'is_excluded'    => $is_excluded,
+          ];
+        }
+        fclose($fh);
+      }
+    }
+
+    $out = $dir . '/resolved.jsonl';
+    @unlink($out);
+
+    // CSV de no mapeados
+    $unmapped_csv = $dir . '/unmapped.csv';
+    $fh_unm = fopen($unmapped_csv, 'w');
+    fputcsv($fh_unm, ['sku','brand','model','title','lvl1','lvl2','lvl3','lvl3_id','price_usd','fx','stock'], $sep, $enc, $esc);
+
+    $mapped=0; $unmapped=0;
+    foreach ($rows as $r) {
+      $lvl3_id = isset($r['lvl3_id']) ? trim((string)$r['lvl3_id']) : null;
+
+      if ($lvl3_id !== null && $lvl3_id !== '' && isset($mapping[$lvl3_id])) {
+        $m = $mapping[$lvl3_id];
+        $r['category_id']    = $m['category_id'];
+        $r['subcategory_id'] = $m['subcategory_id'];
+        $r['margin_rule_id'] = $m['margin_rule_id'];
+        if (!empty($m['is_excluded'])) $r['is_excluded'] = 1;
+        $mapped++;
+      } else {
+        $r['unmapped'] = true;
+        $unmapped++;
+        // Guardar fila pendiente en CSV
+        fputcsv($fh_unm, [
+          $r['sku'] ?? null,
+          $r['brand'] ?? null,
+          $r['model'] ?? null,
+          $r['title'] ?? null,
+          $r['lvl1'] ?? null,
+          $r['lvl2'] ?? null,
+          $r['lvl3'] ?? null,
+          $lvl3_id,
+          $r['price_usd'] ?? null,
+          $r['fx'] ?? null,
+          $r['stock'] ?? null,
+        ], $sep, $enc, $esc);
+      }
+
+      // === Refuerzo lvl1_id — CompuFix ===
+      if (!isset($r['lvl1_id']) || $r['lvl1_id']==='' || $r['lvl1_id']==='---') {
+        $lvl1='';
+        foreach (['lvl1_id','id_n1','id_menu_nvl_1','ID Menu Nvl 1','lvl1','n1_id'] as $k) {
+          if (isset($r[$k]) && trim((string)$r[$k])!=='' ) { $lvl1 = trim((string)$r[$k]); break; }
+        }
+        if ($lvl1!=='' ) { $r['lvl1_id'] = $lvl1; }
+      }
+      compu_import_append_jsonl($out, $r);
+    }
+    fclose($fh_unm);
+
+    compu_import_log($run_id,'resolve-map','info','Mapeo aplicado',
+      ['mapped'=>$mapped,'unmapped'=>$unmapped,'mapping_csv'=>$map_file,'unmapped_csv'=>$unmapped_csv]);
+    \WP_CLI::success("Run {$run_id}: resolve-map mapped={$mapped} unmapped={$unmapped}");
+  }
+}

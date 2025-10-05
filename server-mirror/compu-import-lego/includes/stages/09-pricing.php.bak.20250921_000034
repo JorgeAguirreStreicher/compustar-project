@@ -1,0 +1,129 @@
+<?php 
+if (!defined('ABSPATH')) { exit; }
+
+/**
+ * Stage 09 — Pricing Woo (lower-only)
+ * - Selecciona la mejor oferta (precio más bajo con stock) desde wp_compu_offers por producto.
+ * - Escribe el precio nativo de Woo (_regular_price y _price) con IVA (8%/16%) ya calculado en Stage 08.
+ * - Política LOWER-ONLY: nunca sube precios en Woo; solo baja o mantiene.
+ * - No toca stock ni media ni categorías.
+ */
+if (!class_exists('Compu_Stage_Pricing')) {
+class Compu_Stage_Pricing {
+  public function run($args){
+    global $wpdb;
+
+    // Args
+    $run_id       = compu_import_run_id_from_arg($args['run-id'] ?? 'last');
+    $sourceFilter = $args['source'] ?? null; // opcional, ej. 'syscom'
+    $limit        = intval($args['limit'] ?? 0);
+    $vat          = intval($args['vat'] ?? 16); // 16 o 8; define qué campo gross usar
+    $onlyExisting = !empty($args['only-existing']);
+    $dry          = ((int)getenv('DRY_RUN') === 1);
+
+    if ($onlyExisting && !function_exists('wc_get_product_id_by_sku')) {
+      \WP_CLI::error('WooCommerce no disponible (wc_get_product_id_by_sku).');
+    }
+
+    // QOF: resolved.jsonl preferido
+    $base = compu_import_get_base_dir();
+    $dir  = trailingslashit($base).'run-'.$run_id;
+    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+    if (!file_exists($src)) \WP_CLI::error('Falta resolved/validated.jsonl');
+
+    $rows = compu_import_read_jsonl($src);
+    $ok_lowered=0; $kept=0; $skipped=0; $errors=0; $no_offer=0;
+
+    // Tabla de ofertas
+    $offers_table = $wpdb->prefix.'compu_offers';
+
+    foreach ($rows as $r) {
+      if (!empty($r['is_excluded'])) { $skipped++; continue; }
+      if (!empty($r['unmapped']) || empty($r['category_id'])) { $skipped++; continue; }
+
+      $sku = $r['sku'] ?: ($r['supplier_sku'] ?? null);
+      if (!$sku) { $skipped++; continue; }
+
+      $pid = wc_get_product_id_by_sku($sku);
+      if ($onlyExisting && !$pid) { $skipped++; continue; }
+      if (!$pid) { continue; }
+
+      // Elegir campo de precio con IVA según $vat
+      $grossField = ($vat === 8) ? 'price_gross_8' : 'price_gross_16';
+
+      // Buscar mejor oferta con stock > 0 para este post_id (y fuente opcional)
+      $where = 'post_id = %d AND stock > 0';
+      $params = [$pid];
+      if (!empty($sourceFilter)) {
+        $where .= ' AND source = %s';
+        $params[] = $sourceFilter;
+      }
+      // Nota: los precios ya vienen redondeados/margineados desde Stage 08
+      $sql = $wpdb->prepare("SELECT id, {$grossField} AS price, stock, source FROM {$offers_table} WHERE {$where} ORDER BY {$grossField} ASC LIMIT 1", $params);
+      $best = $wpdb->get_row($sql, ARRAY_A);
+
+      if (!$best || !is_array($best) || floatval($best['price']) <= 0) {
+        $no_offer++; 
+        compu_import_log($run_id, 'pricing', 'warn', 'Sin oferta válida con stock', ['post_id'=>$pid, 'sku'=>$sku]);
+        continue;
+      }
+
+      $target = (string)round(floatval($best['price']), 2); // preservar 2 decimales; ya debe venir sin centavos según regla, pero por seguridad
+      // Leer precios actuales en Woo
+      $regular = get_post_meta($pid, '_regular_price', true);
+      $sale    = get_post_meta($pid, '_sale_price', true);
+      $price   = get_post_meta($pid, '_price', true);
+
+      $regular = ($regular === '') ? null : floatval($regular);
+      $sale    = ($sale === '') ? null : floatval($sale);
+      $price   = ($price === '') ? null : floatval($price);
+
+      // Determinar precio efectivo actual
+      $effective = is_numeric($regular) ? $regular : PHP_FLOAT_MAX;
+      if (is_numeric($sale) && $sale > 0 && $sale < $effective) { $effective = $sale; }
+
+      // LOWER-ONLY
+      $target_f = floatval($target);
+      if ($target_f < $effective) {
+        // Bajar precio
+        if (!$dry) {
+          update_post_meta($pid, '_regular_price', $target);
+          // Si hay sale y ya no es menor, limpiar sale
+          if (is_numeric($sale) && $sale >= $target_f) {
+            update_post_meta($pid, '_sale_price', '');
+            $sale = null;
+          }
+          // _price = min(regular, sale válido)
+          $final = (is_numeric($sale) && $sale > 0 && $sale < $target_f) ? $sale : $target_f;
+          update_post_meta($pid, '_price', (string)$final);
+        }
+        $ok_lowered++;
+        compu_import_log($run_id,'pricing','info','Precio bajado (lower-only)',[
+          'post_id'=>$pid,'sku'=>$sku,'from'=>$effective,'to'=>$target_f,'source'=>$best['source']
+        ]);
+      } else {
+        // Mantener
+        // Aseguramos coherencia _price si el sale quedó inválido
+        if (!$dry) {
+          $effective_now = is_numeric($regular) ? $regular : PHP_FLOAT_MAX;
+          if (is_numeric($sale) && $sale > 0 && $sale < $effective_now) { $effective_now = $sale; }
+          update_post_meta($pid, '_price', (string)$effective_now);
+        }
+        $kept++;
+        compu_import_log($run_id,'pricing','info','Precio mantenido (lower-only)',[
+          'post_id'=>$pid,'sku'=>$sku,'effective'=>$effective,'target'=>$target_f,'source'=>$best['source']
+        ]);
+      }
+
+      if ($limit && ($ok_lowered + $kept + $skipped + $no_offer) >= $limit) break;
+    }
+
+    compu_import_log($run_id,'pricing','info','Stage 09 completado',[
+      'lowered'=>$ok_lowered,'kept'=>$kept,'skipped'=>$skipped,'no_offer'=>$no_offer,'dry_run'=>$dry ? 1 : 0
+    ]);
+
+    \WP_CLI::success("Run {$run_id}: pricing LOWERED={$ok_lowered} KEPT={$kept} SKIPPED={$skipped} NO_OFFER={$no_offer}".($dry ? " [DRY_RUN]" : ""));
+  }
+}
+
+}

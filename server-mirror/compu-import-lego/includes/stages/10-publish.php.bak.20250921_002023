@@ -1,0 +1,80 @@
+<?php if (!defined('ABSPATH')) { exit; }
+/**
+ * Stage 10 — Publish
+ * Objetivo: Publicar productos ya preparados (mapeados, con precio y stock aplicados en stages previos).
+ * - No toca precios, imágenes ni términos.
+ * - Cambia `post_status` a 'publish' y `catalog_visibility` a 'visible' para SKUs elegibles.
+ * - Respeta DRY_RUN=1.
+ * - Opcional: min-stock para publicar (default 1).
+ */
+class Compu_Stage_Publish {
+  public function run($args){
+    global $wpdb;
+
+    $run_id    = compu_import_run_id_from_arg($args['run-id'] ?? 'last');
+    $limit     = intval($args['limit'] ?? 0);
+    $minStock  = intval($args['min-stock'] ?? 1);
+    $onlyExisting = !empty($args['only-existing']);
+    $dry = ((int)getenv('DRY_RUN') === 1);
+
+    // Fuente de filas (resolved.jsonl preferido)
+    $base = compu_import_get_base_dir();
+    $dir  = trailingslashit($base).'run-'.$run_id;
+    $src  = file_exists($dir.'/resolved.jsonl') ? $dir.'/resolved.jsonl' : $dir.'/validated.jsonl';
+    if (!file_exists($src)) { \WP_CLI::error('Falta resolved/validated.jsonl'); }
+
+    $rows = compu_import_read_jsonl($src);
+    $ok=0; $kept=0; $skipped=0; $err=0;
+
+    foreach ($rows as $r){
+      if (!empty($r['is_excluded'])) { $skipped++; continue; }
+      if (!empty($r['unmapped']) || empty($r['category_id'])) { $skipped++; continue; }
+
+      $st = isset($r['stock']) ? (int)$r['stock'] : 0;
+      if ($st < $minStock) { $skipped++; continue; }
+
+      $sku = $r['sku'] ?: ($r['supplier_sku'] ?? null);
+      if (!$sku) { $skipped++; continue; }
+
+      $pid = function_exists('wc_get_product_id_by_sku') ? wc_get_product_id_by_sku($sku) : 0;
+      if ($onlyExisting && !$pid) { $skipped++; continue; }
+      if (!$pid) { continue; }
+
+      // Comprobar estado actual
+      $post = get_post($pid);
+      if (!$post) { $skipped++; continue; }
+
+      $needs_publish = ($post->post_status !== 'publish');
+      $vis = get_post_meta($pid, 'catalog_visibility', true);
+      $needs_visible = ($vis !== 'visible');
+
+      if (!$needs_publish && !$needs_visible) { $kept++; continue; }
+
+      if ($dry) {
+        $ok++;
+        compu_import_log($run_id,'publish','info','Simulación: publicar/visibilizar', ['post_id'=>$pid,'sku'=>$sku,'from_status'=>$post->post_status,'from_visibility'=>$vis]);
+      } else {
+        // Publicar y visibilizar
+        if ($needs_publish) {
+          wp_update_post(['ID'=>$pid,'post_status'=>'publish']);
+        }
+        if ($needs_visible) {
+          update_post_meta($pid, 'catalog_visibility', 'visible');
+        }
+        // Mantener coherencia de tablas lookup y transients
+        if (function_exists('wc_delete_product_transients')) { wc_delete_product_transients($pid); }
+        if (function_exists('wc_update_product_lookup_tables')) { wc_update_product_lookup_tables($pid); }
+
+        $ok++;
+        compu_import_log($run_id,'publish','info','Producto publicado/visible', ['post_id'=>$pid,'sku'=>$sku]);
+      }
+
+      if ($limit && $ok >= $limit) break;
+    }
+
+    compu_import_log($run_id,'publish','info','Stage 10 completado',[
+      'ok'=>$ok,'kept'=>$kept,'skipped'=>$skipped,'dry_run'=>$dry ? 1 : 0
+    ]);
+    \WP_CLI::success("Run {$run_id}: publish OK={$ok} KEPT={$kept} SKIPPED={$skipped}".($dry ? " [DRY_RUN]" : ""));
+  }
+}

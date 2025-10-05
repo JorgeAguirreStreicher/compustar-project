@@ -1,0 +1,188 @@
+<?php
+/**
+ * Stage 06 — Products (safe writer, web-safe)
+ * - Reads RUN_DIR/resolved.jsonl (or validated.jsonl as fallback)
+ * - Writes CSV reports into RUN_DIR/final and a log into RUN_DIR/logs/stage06.log
+ * - NO DB writes. This is intentionally conservative to avoid site impact.
+ *
+ * Web safety:
+ *   - If executed via a normal web request (not CLI/WP-CLI), it returns immediately.
+ *   - All side effects happen only under CLI or WP-CLI.
+ */
+
+// ======= Web-Request Guard =======
+if (php_sapi_name() !== 'cli' && (!defined('WP_CLI') || !WP_CLI)) {
+    // When included by WordPress in a web request, do nothing.
+    return;
+}
+
+ob_start(); // Silence any accidental output
+
+date_default_timezone_set("UTC");
+register_shutdown_function(function() {
+  $e = error_get_last();
+  if ($e && in_array($e["type"], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+    if (function_exists("s06_log")) {
+      s06_log("FATAL shutdown type={$e["type"]} file={$e["file"]}:{} msg={$e["message"]}");
+    }
+  }
+});
+
+
+// ======= Environment =======
+$RUN_ID   = getenv('RUN_ID') ?: 'unknown';
+$RUN_DIR  = getenv('RUN_DIR') ?: '';
+$DEBUG    = (int) (getenv('DEBUG') ?: 1);
+$LIMIT    = (int) (getenv('LIMIT') ?: 0);
+$OFFSET   = (int) (getenv('OFFSET') ?: 0);
+$DRY_RUN  = (int) (getenv('DRY_RUN') ?: 0);
+$INPUT    = getenv('INPUT_JSONL'); // optional override
+
+// Logging helper
+function s06_log($msg) {
+    global $RUN_DIR;
+    $line = '[' . date('Y-m-d H:i:s') . "] stage06: $msg\n";
+    if ($RUN_DIR && is_dir("$RUN_DIR/logs")) {
+        @file_put_contents("$RUN_DIR/logs/stage06.log", $line, FILE_APPEND);
+    }
+    // Also write to PHP error log (helpful when run via CLI)
+    error_log($line);
+}
+
+// Defaults & dirs
+if (!$RUN_DIR) {
+    $RUN_DIR = __DIR__;
+}
+if (!$INPUT) {
+    $cand1 = $RUN_DIR . '/resolved.jsonl';
+    $cand2 = $RUN_DIR . '/validated.jsonl';
+    $INPUT = is_readable($cand1) ? $cand1 : $cand2;
+}
+
+$FINAL_DIR = $RUN_DIR . '/final';
+if (!is_dir($FINAL_DIR)) {
+    @mkdir($FINAL_DIR, 0775, true);
+    @chmod($FINAL_DIR, 02775); // group-sticky for uploads dir
+}
+
+s06_log("START RUN_ID={$RUN_ID} RUN_DIR={$RUN_DIR} DRY_RUN={$DRY_RUN} LIMIT={$LIMIT} OFFSET={$OFFSET} INPUT={$INPUT}");
+
+// ======= Optional WP bootstrap (ONLY for CLI/WP-CLI; kept silent) =======
+// Not strictly needed for the safe-writer, but harmless if present.
+if (!defined('ABSPATH')) {
+    // Derive /wp-load.php from plugin path depth: .../wp-content/plugins/.../includes/stages/06-products.php
+    $wpLoad = dirname(__DIR__, 5) . '/wp-load.php';
+    if (is_readable($wpLoad)) {
+        require_once $wpLoad;
+        s06_log('WP bootstrap OK');
+    } else {
+        s06_log("WP bootstrap SKIPPED (not readable: {$wpLoad})");
+    }
+}
+
+// ======= Open CSVs (header) — use 5 args for PHP >= 8.4 =======
+$csvHeader  = ['sku','product_id','action','reason'];
+$csvImported = fopen($FINAL_DIR . '/imported.csv', 'w');
+$csvUpdated  = fopen($FINAL_DIR . '/updated.csv',  'w');
+$csvSkipped  = fopen($FINAL_DIR . '/skipped.csv',  'w');
+
+if (!$csvImported || !$csvUpdated || !$csvSkipped) {
+    s06_log("FATAL could not open CSVs in {$FINAL_DIR}");
+    ob_end_clean();
+    exit(1);
+}
+
+fputcsv($csvImported, $csvHeader, ",", "\"", "\\");
+fputcsv($csvUpdated,  $csvHeader, ",", "\"", "\\");
+fputcsv($csvSkipped,  $csvHeader, ",", "\"", "\\");
+fflush($csvImported); fflush($csvUpdated); fflush($csvSkipped);
+
+s06_log('OPENED_CSV final/imported.csv, updated.csv, skipped.csv');
+
+// ======= Input file handling =======
+if (!$INPUT || !is_readable($INPUT)) {
+    s06_log("FATAL input not readable: {$INPUT}");
+    if ($csvImported) fclose($csvImported);
+    if ($csvUpdated)  fclose($csvUpdated);
+    if ($csvSkipped)  fclose($csvSkipped);
+    ob_end_clean();
+    exit(2);
+}
+
+$fh = fopen($INPUT, 'r');
+if (!$fh) {
+    s06_log("FATAL failed fopen: {$INPUT}");
+    if ($csvImported) fclose($csvImported);
+    if ($csvUpdated)  fclose($csvUpdated);
+    if ($csvSkipped)  fclose($csvSkipped);
+    ob_end_clean();
+    exit(3);
+}
+
+// ======= Processing (NO DB writes) =======
+$lineNo=0; $processed=0; $created=0; $updated=0; $skipped=0;
+
+while (!feof($fh)) {
+    $line = fgets($fh);
+    if ($line === false) break;
+    $lineNo++;
+    if ($OFFSET && $lineNo <= $OFFSET) continue;
+
+    $row = json_decode($line, true);
+    if (!is_array($row)) {
+        $skipped++;
+        fputcsv($csvSkipped, ["", "", "skipped", "invalid_json"], ",", "\"", "\\");
+        continue;
+    }
+
+    // Derive SKU (priority)
+    $sku = "";
+    foreach (['sku','model','codigo','code'] as $k) {
+        if (!empty($row[$k])) { $sku = trim((string)$row[$k]); break; }
+    }
+    if ($sku === "") {
+        $skipped++;
+        fputcsv($csvSkipped, ["", "", "skipped", "missing_sku"], ",", "\"", "\\");
+        continue;
+    }
+
+    // Very conservative classification (no DB):
+    $hasTitle = !empty($row['title']);
+    $hasBrand = !empty($row['brand']);
+
+    if ($hasTitle && $hasBrand) {
+        // Treat as "new/imported" safely
+        $created++;
+        fputcsv($csvImported, [$sku, "", "imported", "safe-simulated"], ",", "\"", "\\");
+    } elseif ($hasTitle && !$hasBrand) {
+        $updated++;
+        fputcsv($csvUpdated,  [$sku, "", "updated",  "missing_brand_simulated"], ",", "\"", "\\");
+    } else {
+        $skipped++;
+        fputcsv($csvSkipped,  [$sku, "", "skipped",  "missing_title_brand"], ",", "\"", "\\");
+    }
+
+    $processed++;
+    if ($LIMIT && $processed >= $LIMIT) break;
+}
+fclose($fh);
+
+fflush($csvImported); fclose($csvImported);
+fflush($csvUpdated);  fclose($csvUpdated);
+fflush($csvSkipped);  fclose($csvSkipped);
+
+s06_log("DONE processed={$processed} created={$created} updated={$updated} skipped={$skipped}");
+
+// Final JSON (only visible in CLI/WP-CLI)
+echo json_encode([
+    'stage'     => '06-products-minimal',
+    'run_id'    => $RUN_ID,
+    'run_dir'   => $RUN_DIR,
+    'processed' => $processed,
+    'created'   => $created,
+    'updated'   => $updated,
+    'skipped'   => $skipped,
+], JSON_UNESCAPED_SLASHES) . "\n";
+
+// Clean any buffered output
+ob_end_clean();

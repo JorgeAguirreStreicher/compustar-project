@@ -1,0 +1,66 @@
+<?php
+if (!defined("COMP_RUN_STAGE")) { return; }
+if (!((defined('WP_CLI') && WP_CLI) || (defined('COMP_RUN_STAGE') && COMP_RUN_STAGE))) { return; }
+/**
+ * Stage 11: Report (correo resumen)
+ */
+$RUN_DIR = getenv('RUN_DIR'); $DEBUG = getenv('DEBUG') ?: 0;
+if (!$RUN_DIR) { fwrite(STDERR,"[11] Falta RUN_DIR\n"); return; }
+@mkdir("$RUN_DIR/logs", 0775, true); @mkdir("$RUN_DIR/final", 0775, true);
+
+$LOG = fopen("$RUN_DIR/logs/stage11.log","a");
+function SLOG11($m){ global $LOG,$DEBUG; $l="[".date('Y-m-d H:i:s')."] $m\n"; if($LOG) fwrite($LOG,$l); if($DEBUG) echo $l; }
+
+SLOG11("== Stage 11: report ==");
+
+// Destinatario y asunto
+$to = getenv('REPORT_TO');
+if (!$to) { $to = get_option('admin_email') ?: 'root@localhost'; }
+$subject = "[Compustar] Resumen run " . (getenv('RUN_ID') ?: basename($RUN_DIR));
+
+// Contenido
+$lines = [];
+$final = "$RUN_DIR/final";
+$lines[] = "Archivos en final/:";
+if (is_dir($final)) {
+  foreach (scandir($final) as $f) {
+    if ($f === '.' || $f === '..') continue;
+    $p = "$final/$f";
+    if (is_file($p)) {
+      $rows = @file($p);
+      $n = is_array($rows) ? max(0, count($rows)-1) : 0;
+      $lines[] = " - $f ($n filas)";
+    }
+  }
+} else {
+  $lines[] = " (sin carpeta final)";
+}
+
+$log9 = "$RUN_DIR/logs/stage09.log";
+$lines[] = "";
+$lines[] = "Últimos 50 de stage09.log:";
+if (file_exists($log9)) {
+  $arr = @file($log9, FILE_IGNORE_NEW_LINES);
+  if (!is_array($arr)) { $arr = []; }
+  $tail = array_slice($arr, -50);
+  foreach ($tail as $ln) { $lines[] = "   " . $ln; }
+} else {
+  $lines[] = "   (no existe stage09.log)";
+}
+
+$body = implode("\n", $lines);
+
+// Asegura wp_mail
+if (!function_exists('wp_mail')) {
+  require_once ABSPATH . 'wp-includes/pluggable.php';
+}
+
+// Envío
+$r = false;
+try {
+  $r = wp_mail($to, $subject, $body);
+} catch (Throwable $e) {
+  SLOG11("wp_mail exception: ".$e->getMessage());
+}
+
+SLOG11("Email a $to => " . ($r ? 'OK' : 'FALLO'));

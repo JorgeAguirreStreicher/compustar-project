@@ -1,0 +1,330 @@
+<?php
+/**
+ * Stage 06 — Products (minimal scope)
+ *
+ * Responsibilities (ONLY):
+ *  - Read normalized rows from RUN_DIR/resolved.jsonl (fallback validated.jsonl)
+ *  - Create/Update WooCommerce product shell (title, content, excerpt, SKU, slug, type)
+ *  - Manage product-level stock (_manage_stock, _stock, _stock_status)
+ *  - Set weight (_weight)
+ *  - Upsert into custom table wp_compu_products (basic descriptive fields only)
+ *
+ * EXPLICITLY OUT OF SCOPE here (moved to other stages):
+ *  - Pricing (Woo meta _regular_price/_price/_sale_price) → Stage 09
+ *  - Media download / thumbnails / gallery → Stage 07
+ *  - Offers per warehouse (wp_compu_offers) → Stage 08
+ *  - Taxonomy assignment (categories/brands creation/assignment) → Stage 05
+ *
+ * Environment variables:
+ *  - RUN_ID (int) — required for output paths
+ *  - RUN_DIR (string) — required, path to run directory
+ *  - LIMIT (int) — optional, process first N rows
+ *  - DRY_RUN (0|1) — default 0, if 1 do not write to DB
+ *  - DEBUG (0|1) — verbose logs to file
+ *  - REQUIRE_TERM (0|1) — default 1; if 1 we SKIP creating NEW products that do not have a mapped term/category
+ *
+ * Outputs:
+ *  - $RUN_DIR/logs/stage06.log
+ *  - $RUN_DIR/final/imported.csv, updated.csv, skipped.csv
+ */
+
+if (php_sapi_name() !== 'cli' && (!defined('WP_CLI') || !WP_CLI)) {
+    // Guard: do nothing on front-end.
+    return;
+}
+
+/** -------------- PATCH: Robust bootstrap WordPress for CLI -------------- */
+if (!function_exists('get_option')) {
+    // Robust bootstrap for CLI (ensure WordPress is loaded so $wpdb, WC, etc. exist)
+    $wp_root = null;
+
+    // 1) Respect explicit WP path from env if present
+    $wp_env = getenv('WP');
+    if ($wp_env && is_dir($wp_env)) {
+        $cand = rtrim($wp_env, '/').'/wp-load.php';
+        if (file_exists($cand)) $wp_root = rtrim($wp_env, '/');
+    }
+
+    // 2) Try relative walking from this plugin (includes/stages → includes → plugin → plugins → wp-content → WP root)
+    if (!$wp_root) {
+        $cand = dirname(__DIR__, 5) . '/wp-load.php'; // go up 5 levels to WP root
+        if (file_exists($cand)) $wp_root = dirname($cand);
+    }
+
+    // 3) One more fallback: common docroot
+    if (!$wp_root && isset($_SERVER['DOCUMENT_ROOT'])) {
+        $cand = rtrim($_SERVER['DOCUMENT_ROOT'], '/').'/wp-load.php';
+        if (file_exists($cand)) $wp_root = rtrim($_SERVER['DOCUMENT_ROOT'], '/');
+    }
+
+    if ($wp_root) {
+        require_once $wp_root . '/wp-load.php';
+    }
+}
+// Fail fast if still not in WP context
+global $wpdb;
+if (!isset($wpdb) || !is_object($wpdb)) {
+    fwrite(STDERR, "[stage06] FATAL: WordPress not loaded — \$wpdb unavailable. Use: wp --path=/home/compustar/htdocs eval-file ...\n");
+    exit(2);
+}
+/** ------------------------ /PATCH bootstrap WP -------------------------- */
+
+// --- Env & paths
+$RUN_ID  = (int) getenv('RUN_ID');
+$RUN_DIR = rtrim((string) getenv('RUN_DIR'), '/');
+$LIMIT   = getenv('LIMIT') !== false ? (int) getenv('LIMIT') : null;
+$DRY     = (int) (getenv('DRY_RUN') !== false ? getenv('DRY_RUN') : 0);
+$DEBUG   = (int) (getenv('DEBUG') !== false ? getenv('DEBUG') : 0);
+$REQUIRE_TERM = (int) (getenv('REQUIRE_TERM') !== false ? getenv('REQUIRE_TERM') : 1);
+
+// dirs & logger
+$logDir   = $RUN_DIR . '/logs';
+$finalDir = $RUN_DIR . '/final';
+@mkdir($logDir, 0775, true);
+@mkdir($finalDir, 0775, true);
+$logFile  = $logDir . '/stage06.log';
+$logFp    = fopen($logFile, 'a');
+
+function s06_log(string $msg) {
+    global $logFp, $DEBUG;
+    $line = '[' . date('Y-m-d H:i:s') . "] stage06: " . $msg . "\n";
+    if ($logFp) { fwrite($logFp, $line); }
+    if ($DEBUG) { fwrite(STDOUT, $line); }
+}
+
+s06_log("RUN_ID=$RUN_ID RUN_DIR=$RUN_DIR DRY_RUN=$DRY LIMIT=" . ($LIMIT ?? 'none') . " REQUIRE_TERM=$REQUIRE_TERM");
+
+// --- Input file resolution
+$inResolved  = $RUN_DIR . '/resolved.jsonl';
+$inValidated = $RUN_DIR . '/validated.jsonl';
+$inFile = file_exists($inResolved) ? $inResolved : (file_exists($inValidated) ? $inValidated : null);
+if (!$inFile) {
+    s06_log('ERROR: No input file found (resolved.jsonl or validated.jsonl).');
+    exit(3);
+}
+
+// Asegura carpeta final/ antes de abrir CSVs
+$finalDir = rtrim(getenv('RUN_DIR') ?: $RUN_DIR ?: '/tmp', '/') . '/final';
+if (function_exists('wp_mkdir_p')) {
+    wp_mkdir_p($finalDir);
+} else {
+    if (!is_dir($finalDir)) {
+        @mkdir($finalDir, 0775, true);
+    }
+}
+
+// --- Output CSVs
+$csvImported = fopen($finalDir . '/imported.csv', 'w');
+$csvUpdated  = fopen($finalDir . '/updated.csv', 'w');
+$csvSkipped  = fopen($finalDir . '/skipped.csv', 'w');
+$csvHeader   = ['sku','product_id','action','reason'];
+fputcsv($csvImported, $csvHeader, ',', '"', '\\');
+fputcsv($csvUpdated,  $csvHeader, ',', '"', '\\');
+fputcsv($csvSkipped,  $csvHeader, ',', '"', '\\');
+
+// --- Helpers
+function s06_first(array $row, array $keys, $default=null) {
+    foreach ($keys as $k) {
+        if (array_key_exists($k, $row) && $row[$k] !== '' && $row[$k] !== null) {
+            return $row[$k];
+        }
+    }
+    return $default;
+}
+
+function s06_clip(string $text, int $len=300): string {
+    $t = trim((string) ($text ?? ''));
+    if ($t === '') return '';
+    $t = wp_strip_all_tags($t);
+    return mb_strlen($t) > $len ? mb_substr($t, 0, $len - 1) . '…' : $t;
+}
+
+/** Insert or update row in wp_compu_products (minimal fields) */
+function s06_upsert_compu_product(string $sku, array $row, int $product_id, int $DRY): void {
+    global $wpdb;
+    $table = $wpdb->prefix . 'compu_products';
+    $name  = s06_build_name($row);
+    $short = s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], s06_first($row, ['title','titulo','Título'], '')));
+    $long  = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+    $images= (string) s06_first($row, ['image','Imagen Principal','img','imagen'], '');
+
+    $payload = [
+        'sku'               => $sku,
+        'wp_post_id'        => $product_id,
+        'name'              => $name,
+        'short_description' => $short,
+        'long_description'  => $long,
+        'images_json'       => $images ? json_encode([$images]) : json_encode([]),
+        'updated_at'        => current_time('mysql'),
+    ];
+
+    if ($DRY) { s06_log("DRY: would upsert compu_products for SKU=$sku pid=$product_id"); return; }
+
+    // Try update; if 0 rows, insert
+    $exists = (int) $wpdb->get_var($wpdb->prepare("SELECT id FROM {$table} WHERE sku=%s", $sku));
+    if ($exists) {
+        $wpdb->update($table, $payload, ['id' => $exists]);
+    } else {
+        $payload['created_at'] = current_time('mysql');
+        $wpdb->insert($table, $payload);
+    }
+}
+
+/** BuildName helper (brand + model + title) */
+function s06_build_name(array $row): string {
+    $parts = [];
+    $brand = trim((string) s06_first($row, ['brand','marca'], ''));
+    $model = trim((string) s06_first($row, ['model','modelo'], ''));
+    $title = trim((string) s06_first($row, ['title','titulo','Título'], ''));
+    if ($brand) $parts[] = $brand;
+    if ($model) $parts[] = $model;
+    if ($title) $parts[] = $title;
+    return trim(implode(' ', $parts));
+}
+
+/** Find product by SKU */
+function s06_find_product_id_by_sku(string $sku): ?int {
+    global $wpdb;
+    $post_id = (int) $wpdb->get_var($wpdb->prepare("SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key='_sku' AND meta_value=%s LIMIT 1", $sku));
+    return $post_id ? $post_id : null;
+}
+
+/** Create or update product shell */
+function s06_upsert_wc_product(array $row, int $DRY, int $REQUIRE_TERM, array &$out): ?int {
+    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave']));
+    if ($sku === '') { $out['reason'] = 'no_sku'; return null; }
+
+    // Check existing by _sku
+    $pidExisting = s06_find_product_id_by_sku($sku);
+
+    // If REQUIRE_TERM, SKIP creation if row is not mapped to term (Stage 05)
+    $termId = (int) s06_first($row, ['term_id','termId','woo_term_id','category_id'], 0);
+    if (!$pidExisting && $REQUIRE_TERM && !$termId) {
+        $out['reason'] = 'no_term_for_new';
+        return null;
+    }
+
+    $name = s06_build_name($row);
+    $short= s06_clip(s06_first($row, ['short_description','short','resumen','excerpt'], $name));
+    $long = (string) s06_first($row, ['description','Descripción','descripcion'], '');
+
+    if ($pidExisting) {
+        // Update path
+        if ($DRY) {
+            $out['action'] = 'updated_dry';
+            return (int) $pidExisting;
+        }
+
+        // Minimal product updates
+        wp_update_post([
+            'ID'           => (int) $pidExisting,
+            'post_title'   => $name,
+            'post_excerpt' => $short,
+            'post_content' => $long,
+        ]);
+
+        $out['action'] = 'updated';
+        return (int) $pidExisting;
+    }
+
+    // Create path
+    if ($DRY) {
+        $out['action'] = 'imported_dry';
+        return 0; // indicate would-create
+    }
+
+    $pid = wp_insert_post([
+        'post_type'   => 'product',
+        'post_status' => 'draft',        // Publishing is Stage 10
+        'post_title'  => $name,
+        'post_content'=> $long,
+        'post_excerpt'=> $short,
+    ]);
+
+    if (is_wp_error($pid) || !$pid) {
+        $out['reason'] = 'wp_insert_failed';
+        return null;
+    }
+
+    // Set SKU & basic product type
+    update_post_meta($pid, '_sku', $sku);
+    wp_set_object_terms($pid, 'simple', 'product_type');
+
+    $out['action'] = 'imported';
+    return (int) $pid;
+}
+
+// --- Main loop
+$processed = $created = $updated = $skipped = 0;
+$fh = fopen($inFile, 'r');
+if (!$fh) { s06_log('ERROR: cannot open input file: ' . $inFile); exit(4); }
+
+while (!feof($fh)) {
+    $line = fgets($fh);
+    if ($line === false) break;
+    $line = trim($line);
+    if ($line === '') continue;
+    $processed++;
+    if ($LIMIT !== null && $processed > $LIMIT) break;
+
+    $row = json_decode($line, true);
+    if (!is_array($row)) { $skipped++; fputcsv($csvSkipped, ['', '', 'skipped', 'invalid_json']); continue; }
+
+    $sku = trim((string) s06_first($row, ['sku','SKU','Sku','SkuID','clave'], ''));
+    if ($sku === '') { $skipped++; fputcsv($csvSkipped, ['', '', 'skipped', 'no_sku']); continue; }
+
+    $out = ['sku'=>$sku, 'product_id'=>'', 'action'=>'', 'reason'=>''];
+
+    $pid = s06_upsert_wc_product($row, $DRY, $REQUIRE_TERM, $out);
+    if ($pid === null) {
+        $skipped++;
+        fputcsv($csvSkipped, [$sku, '', $out['action'] ?: 'skipped', $out['reason'] ?: 'unknown']);
+        continue;
+    }
+
+    // Write to compu_products (minimal fields)
+    s06_upsert_compu_product($sku, $row, (int)$pid, $DRY);
+
+    // Tally & write row in the right CSV
+    $out['product_id'] = (string) $pid;
+    switch ($out['action']) {
+        case 'imported':
+            $created++;
+            fputcsv($csvImported, [$sku, (string)$pid, 'imported', '']);
+            break;
+        case 'updated':
+            $updated++;
+            fputcsv($csvUpdated,  [$sku, (string)$pid, 'updated',  '']);
+            break;
+        case 'imported_dry':
+            $created++;
+            fputcsv($csvImported, [$sku, (string)$pid, 'imported_dry', '']);
+            break;
+        case 'updated_dry':
+            $updated++;
+            fputcsv($csvUpdated,  [$sku, (string)$pid, 'updated_dry',  '']);
+            break;
+        default:
+            $skipped++;
+            fputcsv($csvSkipped,  [$sku, (string)$pid, $out['action'] ?: 'skipped', $out['reason'] ?: 'unknown']);
+            break;
+    }
+}
+
+fclose($fh);
+if ($csvImported) fclose($csvImported);
+if ($csvUpdated)  fclose($csvUpdated);
+if ($csvSkipped)  fclose($csvSkipped);
+
+s06_log("DONE processed=$processed created=$created updated=$updated skipped=$skipped");
+
+// Also echo a compact summary to stdout (safe in CLI)
+fwrite(STDOUT, json_encode([
+    'stage'     => '06-products-minimal',
+    'processed' => $processed,
+    'created'   => $created,
+    'updated'   => $updated,
+    'skipped'   => $skipped,
+    'run_id'    => $RUN_ID,
+    'run_dir'   => $RUN_DIR,
+], JSON_UNESCAPED_SLASHES) . "\n");
