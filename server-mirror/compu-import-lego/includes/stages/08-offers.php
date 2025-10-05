@@ -10,7 +10,7 @@ require_once dirname(__DIR__) . '/helpers/helpers-db.php';
  */
 global $wpdb;
 
-$RUN_DIR = getenv('RUN_DIR');
+$RUN_DIR = compu_import_resolve_run_dir();
 $DEBUG   = getenv('DEBUG') ?: 0;
 $DRY     = (int) (getenv('DRY_RUN') ?: 0);
 $SOURCE  = getenv('OFFERS_SOURCE') ?: 'syscom';
