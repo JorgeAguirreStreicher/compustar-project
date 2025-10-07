@@ -1,0 +1,6 @@
+sku,supplier_sku,price_usd,fx,stock,lvl1_id,lvl2_id,lvl3_id,brand,title,image_url,description
+SKU001,SUP001,10.50,18.40,25,101,201,301,BrandOne,"Starter kit A","http://example.com/a.jpg","Sample description A"
+SKU002,SUP002,15.75,18.40,40,101,202,302,BrandTwo,"Starter kit B","http://example.com/b.jpg","Sample description B"
+SKU003,SUP003,8.25,18.40,10,102,203,303,BrandThree,"Starter kit C","http://example.com/c.jpg","Sample description C"
+SKU004,SUP004,12.00,18.40,5,102,204,304,BrandOne,"Starter kit D","http://example.com/d.jpg","Sample description D"
+SKU005,SUP005,20.00,18.40,60,103,205,305,BrandFour,"Starter kit E","http://example.com/e.jpg","Sample description E"
