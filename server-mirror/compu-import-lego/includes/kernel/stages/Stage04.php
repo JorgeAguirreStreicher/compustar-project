@@ -128,7 +128,7 @@ class Stage04 implements StageInterface
             return 0;
         }
         $count = 0;
-        while (($row = fgetcsv($fh)) !== false) {
+        while (($row = fgetcsv($fh, 0, ',', '"', '\\')) !== false) {
             $count++;
         }
         fclose($fh);

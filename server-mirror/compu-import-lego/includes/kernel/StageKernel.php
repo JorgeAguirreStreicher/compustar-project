@@ -126,8 +126,13 @@ class StageKernel
         ]);
         $logger->close();
 
+        $statusDetail = strtolower($overallStatus);
+        $statusFlag = $overallStatus === StageResult::STATUS_ERROR ? 'error' : 'ok';
+
         return [
-            'status' => $overallStatus,
+            'status' => $statusFlag,
+            'status_detail' => $statusDetail,
+            'status_legacy' => $overallStatus,
             'summary' => $summary,
             'summary_path' => $summaryPath,
             'context' => $context,

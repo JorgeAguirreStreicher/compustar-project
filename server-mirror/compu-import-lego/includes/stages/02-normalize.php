@@ -51,7 +51,7 @@ class Compu_Stage_Normalize {
       $this->cli_error('No se pudieron crear los archivos de salida.');
     }
 
-    fputcsv($csvHandle, $normalizedHead);
+    fputcsv($csvHandle, $normalizedHead, ',', '"', '\\');
 
     while (($row = fgetcsv($handle, 0, $delimiter, '"', '\\')) !== false) {
       if ($this->isEmptyRow($row)) {
@@ -76,7 +76,7 @@ class Compu_Stage_Normalize {
       }
 
       fwrite($jsonHandle, $this->encodeJsonLine($assoc));
-      fputcsv($csvHandle, $csvRow);
+      fputcsv($csvHandle, $csvRow, ',', '"', '\\');
     }
 
     fclose($handle);
@@ -217,7 +217,7 @@ class Compu_Stage_Normalize {
     foreach ($meta as $index => &$item) {
       $item['normalized'] = $unique[$index];
       if ($item['is_sku']) {
-        $item['normalized'] = 'SKU';
+        $item['normalized'] = 'sku';
       }
     }
     unset($item);

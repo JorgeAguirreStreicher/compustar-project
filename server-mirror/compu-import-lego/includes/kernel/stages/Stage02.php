@@ -127,7 +127,7 @@ class Stage02 implements StageInterface
         if (($handle = fopen($file, 'r')) === false) {
             return 0;
         }
-        while (($row = fgetcsv($handle)) !== false) {
+        while (($row = fgetcsv($handle, 0, ',', '"', '\\')) !== false) {
             $count++;
         }
         fclose($handle);
