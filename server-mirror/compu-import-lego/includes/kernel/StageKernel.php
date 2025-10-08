@@ -326,9 +326,7 @@ class StageKernel
         if (!is_dir($dir)) {
             mkdir($dir, 02775, true);
         }
-        @chmod($dir, 02775);
-        @chown($dir, 'compustar');
-        @chgrp($dir, 'compustar');
+        $this->applySharedPermissions($dir, 02775);
     }
 
     private function generateRunId(): string
@@ -354,9 +352,21 @@ class StageKernel
         if (!@symlink($csvSrc, $destination)) {
             @copy($csvSrc, $destination);
         }
-        @chmod($destination, 0664);
-        @chown($destination, 'compustar');
-        @chgrp($destination, 'compustar');
+        $this->applySharedPermissions($destination, 0664);
+    }
+
+    private function applySharedPermissions(string $path, int $mode): void
+    {
+        @chmod($path, $mode);
+        @chown($path, 'compustar');
+        if (!function_exists('posix_getgrnam')) {
+            return;
+        }
+        $group = @posix_getgrnam('compustar');
+        if ($group === false) {
+            return;
+        }
+        @chgrp($path, 'compustar');
     }
 
     private function exportContextEnv(array $context): void
