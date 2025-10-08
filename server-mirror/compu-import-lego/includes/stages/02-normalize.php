@@ -36,6 +36,12 @@ class Compu_Stage_Normalize {
     $headerMeta     = $this->ensureSkuColumn($headerMeta, $modeloIndex);
     $normalizedHead = $this->finalizeHeaderNames($headerMeta);
 
+    // Codex audit: persistimos el mapa de encabezados para las auditorías 01-03.
+    $this->persistHeaderMap(
+      rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'header-map.json',
+      $headerMeta
+    );
+
     $jsonHandle = fopen($jsonPath, 'w');
     $csvHandle  = fopen($csvPath, 'w');
     if ($jsonHandle === false || $csvHandle === false) {
@@ -82,6 +88,35 @@ class Compu_Stage_Normalize {
     fclose($handle);
     fclose($jsonHandle);
     fclose($csvHandle);
+  }
+
+  /**
+   * @param array<int,array{normalized:string,source_index:int,original:string,is_sku:bool}> $meta
+   */
+  private function persistHeaderMap(string $path, array $meta): void {
+    $map = [];
+    foreach ($meta as $item) {
+      $map[] = [
+        'original'      => $item['original'],
+        'normalized'    => $item['normalized'],
+        'source_index'  => $item['source_index'],
+        'is_sku_column' => $item['is_sku'],
+      ];
+    }
+
+    $payload = [
+      'generated_at' => gmdate('c'),
+      'columns'      => $map,
+    ];
+
+    $encoded = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    if ($encoded === false) {
+      $this->cli_error('No se pudo serializar el mapa de encabezados.');
+    }
+
+    if (file_put_contents($path, $encoded) === false) {
+      $this->cli_error("No se pudo escribir header-map.json en {$path}.");
+    }
   }
 
   /**
