@@ -6,14 +6,16 @@ use CompuImport\Kernel\StageResult;
 
 class Stage01 implements StageInterface
 {
+    /** @var string|null */
+    private $stageScript;
+
     /** @var \Compu_Stage_Fetch|null */
     private $stage;
 
-    public function __construct()
+    public function __construct(?string $stageScript = null)
     {
-        if (class_exists('\\Compu_Stage_Fetch')) {
-            $this->stage = new \Compu_Stage_Fetch();
-        }
+        $this->stageScript = $stageScript;
+        $this->initializeStage();
     }
 
     public function id(): string
@@ -38,6 +40,8 @@ class Stage01 implements StageInterface
 
     public function run(array $context): StageResult
     {
+        $this->initializeStage();
+
         $runDir = rtrim((string) ($context['RUN_DIR'] ?? ''), DIRECTORY_SEPARATOR);
         if ($runDir === '') {
             return new StageResult(StageResult::STATUS_ERROR, [], [], 'Missing RUN_DIR for stage 01');
@@ -118,6 +122,21 @@ class Stage01 implements StageInterface
             ['source_csv' => $destination],
             null
         );
+    }
+
+    private function initializeStage(): void
+    {
+        if ($this->stage instanceof \Compu_Stage_Fetch) {
+            return;
+        }
+
+        if (!class_exists('\\Compu_Stage_Fetch') && $this->stageScript && is_file($this->stageScript)) {
+            require_once $this->stageScript;
+        }
+
+        if (class_exists('\\Compu_Stage_Fetch')) {
+            $this->stage = new \Compu_Stage_Fetch();
+        }
     }
 
     private function countCsvRows(string $file, bool $hasHeader): int

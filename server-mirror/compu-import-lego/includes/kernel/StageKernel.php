@@ -262,7 +262,7 @@ class StageKernel
     private function buildStageDefinitions(): void
     {
         $this->stageDefinitions = [];
-        $stage01 = new Stage01();
+        $stage01 = new Stage01($this->pluginDir . '/includes/stages/01-fetch.php');
         $stage02 = new Stage02();
         $stage03 = new Stage03();
         $stage04 = new Stage04();
@@ -366,7 +366,9 @@ class StageKernel
         if ($group === false) {
             return;
         }
-        @chgrp($path, 'compustar');
+        if (function_exists('chgrp')) {
+            @chgrp($path, 'compustar');
+        }
     }
 
     private function exportContextEnv(array $context): void
