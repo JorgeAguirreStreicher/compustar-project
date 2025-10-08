@@ -1,6 +1,7 @@
 <?php
 namespace CompuImport\Kernel;
 
+use CompuImport\Kernel\Stages\Stage01;
 use CompuImport\Kernel\Stages\Stage02;
 use CompuImport\Kernel\Stages\Stage03;
 use CompuImport\Kernel\Stages\Stage04;
@@ -261,12 +262,13 @@ class StageKernel
     private function buildStageDefinitions(): void
     {
         $this->stageDefinitions = [];
+        $stage01 = new Stage01();
         $stage02 = new Stage02();
         $stage03 = new Stage03();
         $stage04 = new Stage04();
         $stage06 = new Stage06($this->phpBinary, $this->pluginDir . '/includes/stages/06-products.php');
 
-        foreach ([$stage02, $stage03, $stage04, $stage06] as $handler) {
+        foreach ([$stage01, $stage02, $stage03, $stage04, $stage06] as $handler) {
             $this->stageDefinitions[$handler->id()] = [
                 'type' => 'php',
                 'title' => $handler->title(),
