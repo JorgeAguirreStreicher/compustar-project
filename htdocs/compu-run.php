@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use CompuImport\Kernel\StageKernel;
 
-const COMPU_RUN_ALLOWED_STAGES = ['02', '03', '04', '06'];
+const COMPU_RUN_ALLOWED_STAGES = ['01', '02', '03', '04', '06'];
 
 if (!function_exists('compu_run_exit')) {
     function compu_run_exit(int $code, string $message = ''): void
@@ -24,10 +24,10 @@ function compu_run_help_text(): string
     return <<<TEXT
 Compu Import unified runner
 Usage:
-  php compu-run.php --stages=02..06 [options]
+  php compu-run.php --stages=01..06 [options]
 
 Options:
-  --stages=LIST          Stage list (e.g. 02..06 or 02,03,04,06)
+  --stages=LIST          Stage list (e.g. 01..06 or 01,02,03,04,06)
   --dry-run=0|1          Skip execution and only prepare run context
   --require-term=0|1     Require taxonomy term mapping (propagated to stages)
   --limit=N              Limit records processed by applicable stages
@@ -178,6 +178,7 @@ function compu_run_require_plugin_bootstrap(string $pluginDir): void
         '/includes/kernel/StageInterface.php',
         '/includes/kernel/StageResult.php',
         '/includes/kernel/RunLogger.php',
+        '/includes/kernel/stages/Stage01.php',
         '/includes/kernel/stages/Stage02.php',
         '/includes/kernel/stages/Stage03.php',
         '/includes/kernel/stages/Stage04.php',
@@ -189,6 +190,7 @@ function compu_run_require_plugin_bootstrap(string $pluginDir): void
     }
 
     $stageScripts = [
+        '/includes/stages/01-fetch.php',
         '/includes/stages/02-normalize.php',
         '/includes/stages/03-validate.php',
         '/includes/stages/04-resolve-map.php',
@@ -279,7 +281,7 @@ function compu_run_main(): void
     $stageSpec = $options['stages'] ?? '02..06';
     $stages = compu_run_expand_stages($stageSpec);
     if (empty($stages)) {
-        compu_run_exit(2, 'Invalid --stages specification. Allowed values: 02..06 or a comma-separated subset of 02,03,04,06.');
+    compu_run_exit(2, 'Invalid --stages specification. Allowed values: 01..06 or a comma-separated subset of 01,02,03,04,06.');
     }
 
     $wpRoot = rtrim($options['wp_root'] ?? getenv('WP_ROOT') ?: __DIR__, DIRECTORY_SEPARATOR);

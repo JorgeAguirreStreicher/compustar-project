@@ -53,7 +53,7 @@ DRY_OUT="$OUT_PREFIX.dry.out"
 DRY_ERR="$OUT_PREFIX.dry.err"
 set +e
 "$PHP_BIN" -d display_errors=1 "$CLI" \
-  --stages=02,03 --dry-run=1 \
+  --stages=01,02,03 --dry-run=1 \
   --csv="$CSV_PATH" --wp-root="$ROOT" --plugin-dir="$PLUGIN_DIR" \
   >"$DRY_OUT" 2>"$DRY_ERR"
 status=$?
@@ -86,7 +86,7 @@ REAL_OUT="$OUT_PREFIX.real.out"
 REAL_ERR="$OUT_PREFIX.real.err"
 set +e
 "$PHP_BIN" -d display_errors=1 "$CLI" \
-  --stages=02..06 \
+  --stages=01..06 \
   --from=1000 --rows=201 --dry-run=0 --require-term=1 \
   --csv="$CSV_PATH" --wp-root="$ROOT" --plugin-dir="$PLUGIN_DIR" \
   >"$REAL_OUT" 2>"$REAL_ERR"
@@ -105,7 +105,7 @@ if [[ ! -f "$RUN_DIR_REAL/final/summary.json" ]]; then
   echo "Check 4 missing summary.json" >&2
   exit 1
 fi
-for stage in 02 03 04 06; do
+for stage in 01 02 03 04 06; do
   if [[ ! -f "$RUN_DIR_REAL/logs/stage-$stage.log" ]]; then
     echo "Check 4 missing log for stage $stage" >&2
     exit 1

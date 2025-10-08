@@ -1,6 +1,7 @@
 <?php
 namespace CompuImport\Kernel;
 
+use CompuImport\Kernel\Stages\Stage01;
 use CompuImport\Kernel\Stages\Stage02;
 use CompuImport\Kernel\Stages\Stage03;
 use CompuImport\Kernel\Stages\Stage04;
@@ -261,12 +262,13 @@ class StageKernel
     private function buildStageDefinitions(): void
     {
         $this->stageDefinitions = [];
+        $stage01 = new Stage01();
         $stage02 = new Stage02();
         $stage03 = new Stage03();
         $stage04 = new Stage04();
         $stage06 = new Stage06($this->phpBinary, $this->pluginDir . '/includes/stages/06-products.php');
 
-        foreach ([$stage02, $stage03, $stage04, $stage06] as $handler) {
+        foreach ([$stage01, $stage02, $stage03, $stage04, $stage06] as $handler) {
             $this->stageDefinitions[$handler->id()] = [
                 'type' => 'php',
                 'title' => $handler->title(),
@@ -324,9 +326,7 @@ class StageKernel
         if (!is_dir($dir)) {
             mkdir($dir, 02775, true);
         }
-        @chmod($dir, 02775);
-        @chown($dir, 'compustar');
-        @chgrp($dir, 'compustar');
+        $this->applySharedPermissions($dir, 02775);
     }
 
     private function generateRunId(): string
@@ -352,9 +352,21 @@ class StageKernel
         if (!@symlink($csvSrc, $destination)) {
             @copy($csvSrc, $destination);
         }
-        @chmod($destination, 0664);
-        @chown($destination, 'compustar');
-        @chgrp($destination, 'compustar');
+        $this->applySharedPermissions($destination, 0664);
+    }
+
+    private function applySharedPermissions(string $path, int $mode): void
+    {
+        @chmod($path, $mode);
+        @chown($path, 'compustar');
+        if (!function_exists('posix_getgrnam')) {
+            return;
+        }
+        $group = @posix_getgrnam('compustar');
+        if ($group === false) {
+            return;
+        }
+        @chgrp($path, 'compustar');
     }
 
     private function exportContextEnv(array $context): void
