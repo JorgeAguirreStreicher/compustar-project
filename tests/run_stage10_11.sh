@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CSV="tests/data/stage10_media_sample.jsonl"
+RUN_DIR="tests/tmp/run-stage10-11-$(date +%s)"
+DRY_RUN=1
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --run-dir=*|--run_dir=*)
+      RUN_DIR="${1#*=}"
+      shift
+      ;;
+    --input=*)
+      CSV="${1#*=}"
+      shift
+      ;;
+    --dry-run=*)
+      DRY_RUN="${1#*=}"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ ! -f "$CSV" ]]; then
+  echo "No existe el archivo de entrada: $CSV" >&2
+  exit 1
+fi
+
+mkdir -p "$RUN_DIR"
+mkdir -p "$RUN_DIR/logs"
+mkdir -p "$RUN_DIR/final"
+
+cp "$CSV" "$RUN_DIR/media.jsonl"
+
+PYTHON=python3
+if ! command -v "$PYTHON" >/dev/null 2>&1; then
+  PYTHON=python
+fi
+
+$PYTHON python/stage10_import.py \
+  --run-dir "$RUN_DIR" \
+  --input "$RUN_DIR/media.jsonl" \
+  --log "$RUN_DIR/logs/stage-10.log" \
+  --report "$RUN_DIR/final/import-report.json" \
+  --dry-run "$DRY_RUN"
+
+$PYTHON python/stage11_postcheck.py \
+  --run-dir "$RUN_DIR" \
+  --import-report "$RUN_DIR/final/import-report.json" \
+  --postcheck "$RUN_DIR/final/postcheck.json" \
+  --log "$RUN_DIR/logs/stage-11.log" \
+  --dry-run "$DRY_RUN" \
+  --run-id "$(basename "$RUN_DIR")"
+
+for path in "$RUN_DIR/final/import-report.json" "$RUN_DIR/final/postcheck.json" \
+            "$RUN_DIR/logs/stage-10.log" "$RUN_DIR/logs/stage-11.log"; do
+  if [[ ! -f "$path" ]]; then
+    echo "Falta artefacto esperado: $path" >&2
+    exit 1
+  fi
+done
+
+echo "\nResumen import-report.json (conteos):"
+python - "$RUN_DIR/final/import-report.json" <<'PY'
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+print({k: len(v) for k, v in data.items() if isinstance(v, list)})
+PY
+
+echo "\nValidaciones básicas:"
+python - "$RUN_DIR/final/import-report.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path, "r", encoding="utf-8"))
+created = data.get("created", [])
+updated = data.get("updated", [])
+skipped = data.get("skipped", [])
+
+assert len(created) == 1, f"esperados 1 created, hay {len(created)}"
+assert len(updated) == 2, f"esperados 2 updated (incluye price_zero existente), hay {len(updated)}"
+assert len(skipped) == 2, f"esperados 2 skipped, hay {len(skipped)}"
+
+sku_new = created[0]
+assert sku_new["stock_total_mayoristas"] == 6, sku_new
+assert sku_new["after"]["set_image"] is True
+
+sku_update = next(item for item in updated if item["sku"] == "SKU-EXIST-LOW")
+assert sku_update["after"]["update_price"] is True
+assert sku_update["after"]["stock"] == 7
+
+sku_price_zero = next(item for item in updated if item["sku"] == "SKU-EXIST-PZ")
+assert sku_price_zero["reason"] == "price_zero"
+assert sku_price_zero["after"]["stock"] == 0
+
+sku_skip_price_zero = next(item for item in skipped if item["sku"] == "SKU-NEW-PZ")
+assert sku_skip_price_zero["reason"] == "price_zero"
+
+sku_skip_stock = next(item for item in skipped if item["sku"] == "SKU-NEW-NOSTOCK")
+assert sku_skip_stock["reason"] == "stock_zero"
+PY
+
+echo "\nimport-report.json → wc -l y head:"
+wc -l "$RUN_DIR/final/import-report.json"
+head "$RUN_DIR/final/import-report.json"
+
+echo "\npostcheck.json → wc -l y head:"
+wc -l "$RUN_DIR/final/postcheck.json"
+head "$RUN_DIR/final/postcheck.json"
+
+echo "\nLogs Stage 10 y 11 (tail -n 5):"
+tail -n 5 "$RUN_DIR/logs/stage-10.log"
+tail -n 5 "$RUN_DIR/logs/stage-11.log"
+
+README_PATH="$RUN_DIR/docs/runs/$(basename "$RUN_DIR")/step-11/README.md"
+if [[ -f "$README_PATH" ]]; then
+  echo "\nREADME Stage 11 generado en: $README_PATH"
+  head "$README_PATH"
+else
+  echo "\nREADME Stage 11 faltante" >&2
+  exit 1
+fi
+
+echo "\nRUN_DIR: $RUN_DIR"
