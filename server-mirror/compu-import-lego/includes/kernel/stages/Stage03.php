@@ -28,7 +28,7 @@ class Stage03 implements StageInterface
 
     public function inputs(): array
     {
-        return ['normalized.jsonl'];
+        return ['normalized.jsonl', 'header-map.json'];
     }
 
     public function outputs(): array
@@ -52,8 +52,14 @@ class Stage03 implements StageInterface
         }
 
         $args = [
-            'run-id' => $context['RUN_DB_ID'] ?? $context['RUN_ID'] ?? null,
+            'run-dir' => $runDir,
         ];
+
+        if (!empty($context['RUN_DB_ID'] ?? null)) {
+            $args['run-id'] = $context['RUN_DB_ID'];
+        } elseif (!empty($context['RUN_ID'] ?? null)) {
+            $args['run-id'] = $context['RUN_ID'];
+        }
 
         $started = microtime(true);
         try {

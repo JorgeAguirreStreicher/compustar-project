@@ -82,6 +82,9 @@ make stage01_02
 - Los nombres de columna se normalizan quitando acentos y reemplazando espacios por guiones bajos.
 - Los conteos de filas entre `source.csv`, `normalized.jsonl` y `normalized.csv` son consistentes.
 
+### Contrato de nombres normalizados
+- Regla de nombres: los campos normalizados de Stage 02 son contrato para Stage 03..11. Nunca se renombran; sólo se agregan campos nuevos.
+
 > Roles/RACI/DoD: ver documento “Equipo y responsabilidades” y la sección de operación del diario.
 <!-- END:CCX_REPOS_SUMMARY -->
 > Roles/RACI/DoD: ver documento “Equipo y responsabilidades” y la sección de operación del diario.

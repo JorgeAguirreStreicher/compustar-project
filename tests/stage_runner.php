@@ -27,6 +27,11 @@ try {
             $runner = new Compu_Stage_Normalize();
             $runner->run($args);
             break;
+        case '03-validate':
+            require_once $rootDir . '/server-mirror/compu-import-lego/includes/stages/03-validate.php';
+            $runner = new Compu_Stage_Validate();
+            $runner->run($args);
+            break;
         default:
             throw new RuntimeException("Stage desconocido: {$stage}");
     }
