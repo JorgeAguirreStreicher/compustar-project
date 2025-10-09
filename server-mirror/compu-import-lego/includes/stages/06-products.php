@@ -59,25 +59,25 @@ class Compu_Stage_Finalize {
 
     $baseColumns = [
       'sku',
+      'Nombre',
       'Marca',
+      'Modelo',
       'Titulo',
       'Su_Precio',
       'Tipo_de_Cambio',
       'ID_Menu_Nvl_1',
       'ID_Menu_Nvl_2',
       'ID_Menu_Nvl_3',
-      'cat_lvl1_id',
-      'cat_lvl2_id',
-      'cat_lvl3_id',
-      'stock_total',
-      'Imagen_Principal',
+      'Almacen_15',
+      'Almacen_15_Tijuana',
       'Descripcion',
+      'Imagen_Principal',
     ];
 
-    $extraColumns = ['price_source', 'resolve_status', 'resolve_reason'];
+    $extraColumns = ['stock_total', 'price_source', 'resolve_status', 'resolve_reason'];
 
     fputcsv($importHandle, array_merge($baseColumns, $extraColumns), ',', '"', '\\');
-    fputcsv($skippedHandle, array_merge($baseColumns, ['resolve_status', 'resolve_reason', 'skip_reason']), ',', '"', '\\');
+    fputcsv($skippedHandle, array_merge($baseColumns, ['stock_total', 'resolve_status', 'resolve_reason', 'skip_reason']), ',', '"', '\\');
 
     $rowsTotal        = 0;
     $rowsImportable   = 0;
@@ -99,7 +99,17 @@ class Compu_Stage_Finalize {
           'json_error' => json_last_error_msg(),
         ]);
         $rowsSkipped++;
-        $this->writeSkippedRow($skippedHandle, $baseColumns, [], 'invalid_json');
+        $this->writeSkippedRow(
+          $skippedHandle,
+          $baseColumns,
+          [],
+          [
+            'stock_details'  => ['almacen_15' => 0.0, 'almacen_15_tijuana' => 0.0, 'total' => 0.0],
+            'resolve_status' => 'error',
+            'resolve_reason' => 'invalid_json',
+          ],
+          'invalid_json'
+        );
         $this->incrementReason($skipReasonsCount, 'invalid_json');
         continue;
       }
@@ -112,7 +122,7 @@ class Compu_Stage_Finalize {
 
       if ($evaluation['importable']) {
         $rowsImportable++;
-        $rowData = $this->prepareRowForCsv($decoded, $baseColumns, $evaluation['final_price'], $evaluation['stock_total']);
+        $rowData = $this->prepareRowForCsv($decoded, $baseColumns, $evaluation['final_price'], $evaluation['stock_details']);
         $rowData['price_source']   = $priceSource ?? '';
         $rowData['resolve_status'] = $evaluation['resolve_status'];
         $rowData['resolve_reason'] = $evaluation['resolve_reason'];
@@ -132,10 +142,8 @@ class Compu_Stage_Finalize {
           $skippedHandle,
           $baseColumns,
           $decoded,
-          implode(';', $reasonList),
-          $evaluation['resolve_status'],
-          $evaluation['resolve_reason'],
-          $evaluation['stock_total']
+          $evaluation,
+          implode(';', $reasonList)
         );
       }
     }
@@ -146,16 +154,23 @@ class Compu_Stage_Finalize {
 
     $summary = [
       'generated_at'    => gmdate('c'),
-      'rows_total'      => $rowsTotal,
+      'total'           => $rowsTotal,
       'import_ready'    => $rowsImportable,
       'skipped'         => $rowsSkipped,
       'skipped_reasons' => $this->sortReasons($skipReasonsCount),
       'price_sources'   => $this->sortReasons($priceSources),
+      'files'           => [
+        'import_ready' => $importPath,
+        'skipped'      => $skippedPath,
+        'summary'      => $summaryPath,
+      ],
     ];
 
     file_put_contents($summaryPath, json_encode($summary, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
-    $this->log($logHandle, 'info', 'Resumen Stage 06', $summary);
+    $logSummary = $summary;
+    $logSummary['log_path'] = $logPath;
+    $this->log($logHandle, 'info', 'Resumen Stage 06', $logSummary);
     fclose($logHandle);
 
     $this->exportArtifacts($args, $runDir, $importPath, $skippedPath, $summaryPath, $logPath, $summary);
@@ -187,8 +202,8 @@ class Compu_Stage_Finalize {
     $status = strtolower($this->stringValue($decoded['resolve_status'] ?? 'ok'));
     $reason = $this->stringValue($decoded['resolve_reason'] ?? '');
 
-    $stockTotal = $this->obtainStockTotal($decoded);
-    $priceData  = $this->extractPrice($decoded);
+    $stockData = $this->extractStockData($decoded);
+    $priceData = $this->extractPrice($decoded);
 
     if ($sku === '') {
       $reasons[] = 'missing_sku';
@@ -197,15 +212,13 @@ class Compu_Stage_Finalize {
       $reasons[] = 'missing_titulo';
     }
 
-    if ($status === 'error') {
+    if ($status === 'blocked_lvl1') {
+      $reasons[] = 'blocked_lvl1';
+    } elseif ($status === 'error') {
       $reasons[] = $reason !== '' ? 'resolve_error:' . $reason : 'resolve_error';
     }
 
-    if ($this->stringValue($decoded['cat_lvl1_id'] ?? null) === '') {
-      $reasons[] = 'missing_cat_lvl1_id';
-    }
-
-    if ($priceData['value'] === null && $stockTotal <= 0) {
+    if ($priceData['value'] === null && $stockData['total'] <= 0) {
       $reasons[] = 'missing_price_and_stock';
     }
 
@@ -216,7 +229,8 @@ class Compu_Stage_Finalize {
       'reasons'        => $reasons,
       'final_price'    => $priceData['value'],
       'price_source'   => $priceData['source'],
-      'stock_total'    => $stockTotal,
+      'stock_total'    => $stockData['total'],
+      'stock_details'  => $stockData,
       'resolve_status' => $status !== '' ? $status : 'ok',
       'resolve_reason' => $reason,
     ];
@@ -246,32 +260,64 @@ class Compu_Stage_Finalize {
 
   /**
    * @param array<string,mixed> $decoded
+   * @return array{almacen_15:float,almacen_15_tijuana:float,total:float}
    */
-  private function obtainStockTotal(array $decoded): float {
-    if (array_key_exists('stock_total', $decoded)) {
-      $numeric = $this->toFloat($decoded['stock_total']);
-      if ($numeric !== null) {
-        return max(0.0, $numeric);
+  private function extractStockData(array $decoded): array {
+    $almacen15 = $this->toFloat($decoded['Almacen_15'] ?? null);
+    $almacen15 = $almacen15 !== null ? max(0.0, $almacen15) : 0.0;
+
+    $almacenTijuana = $this->toFloat($decoded['Almacen_15_Tijuana'] ?? null);
+    $almacenTijuana = $almacenTijuana !== null ? max(0.0, $almacenTijuana) : 0.0;
+
+    if ($almacen15 === 0.0 && $almacenTijuana === 0.0) {
+      $fallback = max(0.0, $this->sumStockFields($decoded));
+      if ($fallback > 0) {
+        $almacen15 = $fallback;
       }
     }
-    return max(0.0, $this->sumStockFields($decoded));
+
+    $total = max(0.0, $almacen15 + $almacenTijuana);
+
+    return [
+      'almacen_15' => $almacen15,
+      'almacen_15_tijuana' => $almacenTijuana,
+      'total' => $total,
+    ];
   }
 
   /**
    * @param array<string,mixed> $row
    * @param array<int,string> $columns
+   * @param array{almacen_15:float,almacen_15_tijuana:float,total:float} $stockDetails
    */
-  private function prepareRowForCsv(array $row, array $columns, ?float $finalPrice, float $stockTotal): array {
+  private function prepareRowForCsv(array $row, array $columns, ?float $finalPrice, array $stockDetails): array {
     $prepared = [];
+    $marca  = $this->stringValue($row['Marca'] ?? '');
+    $modelo = $this->stringValue($row['Modelo'] ?? '');
+    $titulo = $this->stringValue($row['Titulo'] ?? '');
+
     foreach ($columns as $column) {
-      $prepared[$column] = $this->stringValue($row[$column] ?? '');
+      switch ($column) {
+        case 'Nombre':
+          $prepared[$column] = $this->buildNombre($marca, $modelo, $titulo);
+          break;
+        case 'Almacen_15':
+          $prepared[$column] = $this->formatNumber($stockDetails['almacen_15'] ?? 0.0);
+          break;
+        case 'Almacen_15_Tijuana':
+          $prepared[$column] = $this->formatNumber($stockDetails['almacen_15_tijuana'] ?? 0.0);
+          break;
+        default:
+          $prepared[$column] = $this->stringValue($row[$column] ?? '');
+          break;
+      }
     }
 
     if ($finalPrice !== null) {
       $prepared['Su_Precio'] = $this->formatPrice($finalPrice);
     }
 
-    $prepared['stock_total'] = $this->formatNumber($stockTotal);
+    $prepared['stock_total'] = $this->formatNumber($stockDetails['total'] ?? 0.0);
 
     return $prepared;
   }
@@ -297,20 +343,14 @@ class Compu_Stage_Finalize {
    * @param resource $handle
    * @param array<int,string> $columns
    * @param array<string,mixed> $row
+   * @param array{stock_details:array{almacen_15:float,almacen_15_tijuana:float,total:float},resolve_status:string,resolve_reason:string} $evaluation
    */
-  private function writeSkippedRow($handle, array $columns, array $row, string $reason, string $resolveStatus = '', string $resolveReason = '', float $stockTotal = 0.0): void {
-    $prepared = [];
-    foreach ($columns as $column) {
-      if ($column === 'stock_total') {
-        $prepared[] = $this->formatNumber($stockTotal);
-        continue;
-      }
-      $prepared[] = $this->stringValue($row[$column] ?? '');
-    }
-    $prepared[] = $resolveStatus;
-    $prepared[] = $resolveReason;
-    $prepared[] = $reason;
-    fputcsv($handle, $prepared, ',', '"', '\\');
+  private function writeSkippedRow($handle, array $columns, array $row, array $evaluation, string $reason): void {
+    $baseData = $this->prepareRowForCsv($row, $columns, null, $evaluation['stock_details']);
+    $baseData['resolve_status'] = $evaluation['resolve_status'];
+    $baseData['resolve_reason'] = $evaluation['resolve_reason'];
+    $baseData['skip_reason']    = $reason;
+    fputcsv($handle, $this->flattenRow($columns, ['stock_total', 'resolve_status', 'resolve_reason', 'skip_reason'], $baseData), ',', '"', '\\');
   }
 
   private function formatPrice(float $value): string {
@@ -319,6 +359,22 @@ class Compu_Stage_Finalize {
 
   private function formatNumber(float $value): string {
     return rtrim(rtrim(sprintf('%.4f', $value), '0'), '.');
+  }
+
+  private function buildNombre(string $marca, string $modelo, string $titulo): string {
+    $parts = [];
+    foreach ([$marca, $modelo, $titulo] as $part) {
+      $part = trim($part);
+      if ($part !== '') {
+        $parts[] = $part;
+      }
+    }
+    if (empty($parts)) {
+      return '';
+    }
+    $nombre = trim(implode(' ', $parts));
+    $normalized = preg_replace('/\s+/', ' ', $nombre);
+    return $normalized === null ? $nombre : trim($normalized);
   }
 
   private function incrementReason(array &$bucket, string $reason): void {
@@ -499,7 +555,7 @@ class Compu_Stage_Finalize {
     $lines   = [];
     $lines[] = '# Stage 06 - Empaquetado final';
     $lines[] = '';
-    $lines[] = sprintf('* Filas procesadas: %d', (int) ($summary['rows_total'] ?? 0));
+    $lines[] = sprintf('* Filas procesadas: %d', (int) ($summary['total'] ?? 0));
     $lines[] = sprintf('* Importables: %d', (int) ($summary['import_ready'] ?? 0));
     $lines[] = sprintf('* Omitidas: %d', (int) ($summary['skipped'] ?? 0));
     if (isset($summary['skipped_reasons']) && is_array($summary['skipped_reasons'])) {

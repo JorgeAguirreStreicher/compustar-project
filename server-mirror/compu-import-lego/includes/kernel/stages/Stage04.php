@@ -89,39 +89,31 @@ class Stage04 implements StageInterface
             'rows_out' => $rowsOut,
         ];
 
-        $statusCounts = ['ok' => 0, 'warn' => 0, 'error' => 0];
-        $missingMapLvl1 = 0;
-        $missingMapLvl2 = 0;
-        $missingMapLvl3 = 0;
+        $statusCounts = [];
+        $blockedLvl1 = 0;
 
         if (is_file($metricsPath)) {
             $decodedMetrics = json_decode((string) file_get_contents($metricsPath), true);
             if (is_array($decodedMetrics)) {
                 $metrics = array_merge($metrics, array_diff_key($decodedMetrics, array_flip(['status', 'notes'])));
                 if (isset($decodedMetrics['status_counts']) && is_array($decodedMetrics['status_counts'])) {
-                    foreach ($statusCounts as $key => $value) {
-                        if (isset($decodedMetrics['status_counts'][$key])) {
-                            $statusCounts[$key] = (int) $decodedMetrics['status_counts'][$key];
-                        }
+                    foreach ($decodedMetrics['status_counts'] as $statusKey => $statusValue) {
+                        $statusCounts[$statusKey] = (int) $statusValue;
                     }
                 }
-                $missingMapLvl1 = (int) ($decodedMetrics['missing_map_lvl1'] ?? 0);
-                $missingMapLvl2 = (int) ($decodedMetrics['missing_map_lvl2'] ?? 0);
-                $missingMapLvl3 = (int) ($decodedMetrics['missing_map_lvl3'] ?? 0);
+                $blockedLvl1 = (int) ($decodedMetrics['blocked_lvl1'] ?? 0);
             }
         } else {
-            [$statusCounts, $missingMapLvl1, $missingMapLvl2, $missingMapLvl3] = $this->scanResolvedStatuses($resolved);
+            [$statusCounts, $blockedLvl1] = $this->scanResolvedStatuses($resolved);
         }
 
         $metrics['status_counts'] = $statusCounts;
-        $metrics['missing_map_lvl1'] = $missingMapLvl1;
-        $metrics['missing_map_lvl2'] = $missingMapLvl2;
-        $metrics['missing_map_lvl3'] = $missingMapLvl3;
+        $metrics['blocked_lvl1'] = $blockedLvl1;
 
         $status = StageResult::STATUS_OK;
-        if ($statusCounts['error'] > 0) {
-            $status = StageResult::STATUS_WARN;
-        } elseif ($statusCounts['warn'] > 0) {
+        $errorCount = (int) ($statusCounts['error'] ?? 0);
+        $warnCount = (int) ($statusCounts['warn'] ?? 0);
+        if ($errorCount > 0 || $warnCount > 0) {
             $status = StageResult::STATUS_WARN;
         }
 
@@ -177,22 +169,20 @@ class Stage04 implements StageInterface
     }
 
     /**
-     * @return array{0:array{ok:int,warn:int,error:int},1:int,2:int,3:int}
+     * @return array{0:array<string,int>,1:int}
      */
     private function scanResolvedStatuses(string $resolved): array
     {
-        $statusCounts = ['ok' => 0, 'warn' => 0, 'error' => 0];
-        $missingLvl1 = 0;
-        $missingLvl2 = 0;
-        $missingLvl3 = 0;
+        $statusCounts = [];
+        $blockedLvl1 = 0;
 
         if (!is_file($resolved) || !is_readable($resolved)) {
-            return [$statusCounts, $missingLvl1, $missingLvl2, $missingLvl3];
+            return [$statusCounts, $blockedLvl1];
         }
 
         $handle = fopen($resolved, 'r');
         if ($handle === false) {
-            return [$statusCounts, $missingLvl1, $missingLvl2, $missingLvl3];
+            return [$statusCounts, $blockedLvl1];
         }
 
         while (($line = fgets($handle)) !== false) {
@@ -205,23 +195,21 @@ class Stage04 implements StageInterface
                 continue;
             }
             $status = strtolower((string) ($row['resolve_status'] ?? ''));
-            if (isset($statusCounts[$status])) {
-                $statusCounts[$status]++;
+            if ($status === '') {
+                $status = 'ok';
             }
+            if (!isset($statusCounts[$status])) {
+                $statusCounts[$status] = 0;
+            }
+            $statusCounts[$status]++;
 
-            if (empty($row['cat_lvl1_id'])) {
-                $missingLvl1++;
-            }
-            if (!empty($row['ID_Menu_Nvl_2']) && empty($row['cat_lvl2_id'])) {
-                $missingLvl2++;
-            }
-            if (!empty($row['ID_Menu_Nvl_3']) && empty($row['cat_lvl3_id'])) {
-                $missingLvl3++;
+            if ($status === 'blocked_lvl1') {
+                $blockedLvl1++;
             }
         }
 
         fclose($handle);
 
-        return [$statusCounts, $missingLvl1, $missingLvl2, $missingLvl3];
+        return [$statusCounts, $blockedLvl1];
     }
 }
