@@ -1,0 +1,14 @@
+{
+    "generated_at": "2025-10-09T16:46:33+00:00",
+    "rows_total": 490,
+    "import_ready": 452,
+    "skipped": 38,
+    "skipped_reasons": {
+        "resolve_error:missing_id_menu_lvl1": 36,
+        "missing_cat_lvl1_id": 36,
+        "missing_price_and_stock": 2
+    },
+    "price_sources": {
+        "Su_Precio": 488
+    }
+}

@@ -1,0 +1,14 @@
+{
+    "generated_at": "2025-10-09T16:46:32+00:00",
+    "menu_map_path": "\/workspace\/compustar-project\/config\/menu-map.json",
+    "rows_total": 490,
+    "rows_resolved": 490,
+    "status_counts": {
+        "ok": 454,
+        "warn": 0,
+        "error": 36
+    },
+    "missing_map_lvl1": 36,
+    "missing_map_lvl2": 0,
+    "missing_map_lvl3": 0
+}
