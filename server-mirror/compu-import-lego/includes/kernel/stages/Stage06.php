@@ -6,16 +6,21 @@ use CompuImport\Kernel\StageResult;
 
 class Stage06 implements StageInterface
 {
-    /** @var string */
-    private $phpBinary;
+    /** @var \Compu_Stage_Finalize|null */
+    private $stage;
 
-    /** @var string */
-    private $stagePath;
-
-    public function __construct(string $phpBinary, string $stagePath)
+    public function __construct()
     {
-        $this->phpBinary = $phpBinary;
-        $this->stagePath = $stagePath;
+        if (!class_exists('\\Compu_Stage_Finalize')) {
+            $stagePath = dirname(__DIR__, 2) . '/stages/06-products.php';
+            if (is_file($stagePath)) {
+                require_once $stagePath;
+            }
+        }
+
+        if (class_exists('\\Compu_Stage_Finalize')) {
+            $this->stage = new \Compu_Stage_Finalize();
+        }
     }
 
     public function id(): string
@@ -25,7 +30,7 @@ class Stage06 implements StageInterface
 
     public function title(): string
     {
-        return 'Products simulation writer';
+        return 'Final packaging builder';
     }
 
     public function inputs(): array
@@ -35,7 +40,7 @@ class Stage06 implements StageInterface
 
     public function outputs(): array
     {
-        return ['final/imported.csv', 'final/updated.csv', 'final/skipped.csv'];
+        return ['final/import-ready.csv', 'final/skipped.csv', 'final/summary.json'];
     }
 
     public function run(array $context): StageResult
@@ -49,60 +54,68 @@ class Stage06 implements StageInterface
             return new StageResult(StageResult::STATUS_WARN, ['dry_run' => 1], [], 'Dry-run: skipped stage execution');
         }
 
-        if (!is_file($this->stagePath)) {
-            return new StageResult(StageResult::STATUS_ERROR, [], [], 'Stage 06 script not found');
+        if ($this->stage === null) {
+            return new StageResult(StageResult::STATUS_ERROR, [], [], 'Stage 06 class Compu_Stage_Finalize not found');
         }
 
-        $descriptorSpec = [
-            0 => ['pipe', 'r'],
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
+        $args = [
+            'run-id' => $context['RUN_DB_ID'] ?? $context['RUN_ID'] ?? null,
         ];
 
-        $env = array_merge($_ENV, [
-            'RUN_ID' => (string)($context['RUN_ID'] ?? ''),
-            'RUN_DIR' => $runDir,
-            'LIMIT' => (string)($context['LIMIT'] ?? ''),
-            'OFFSET' => (string)($context['OFFSET'] ?? ''),
-            'DRY_RUN' => (string)($context['DRY_RUN'] ?? ''),
-        ]);
+        $started = microtime(true);
 
-        $command = escapeshellcmd($this->phpBinary) . ' ' . escapeshellarg($this->stagePath);
-        $process = proc_open($command, $descriptorSpec, $pipes, $runDir, $env);
-        $stdout = '';
-        $stderr = '';
-        $exitCode = 1;
-
-        if (is_resource($process)) {
-            fclose($pipes[0]);
-            $stdout = stream_get_contents($pipes[1]);
-            fclose($pipes[1]);
-            $stderr = stream_get_contents($pipes[2]);
-            fclose($pipes[2]);
-            $exitCode = proc_close($process);
+        try {
+            $this->stage->run($args);
+        } catch (\Throwable $e) {
+            return new StageResult(
+                StageResult::STATUS_ERROR,
+                ['exception' => get_class($e)],
+                [],
+                $e->getMessage()
+            );
         }
+
+        $duration = (int) round((microtime(true) - $started) * 1000);
+        $resolvedPath = $runDir . '/resolved.jsonl';
+        $importCsv = $runDir . '/final/import-ready.csv';
+        $skippedCsv = $runDir . '/final/skipped.csv';
+        $summaryJson = $runDir . '/final/summary.json';
+        $logPath = $runDir . '/logs/stage-06.log';
+
+        $rowsIn = $this->countInputRows($runDir);
+        $importRows = $this->countCsvRows($importCsv, true);
+        $skippedRows = $this->countCsvRows($skippedCsv, true);
 
         $metrics = [
-            'rows_in' => $this->countInputRows($runDir),
-            'rows_out' => $this->countCsvRows($runDir . '/final/imported.csv', true)
-                + $this->countCsvRows($runDir . '/final/updated.csv', true),
-            'skipped' => $this->countCsvRows($runDir . '/final/skipped.csv', true),
+            'duration_ms' => $duration,
+            'rows_in' => $rowsIn,
+            'import_ready' => $importRows,
+            'skipped' => $skippedRows,
         ];
 
-        $status = $exitCode === 0 ? StageResult::STATUS_OK : StageResult::STATUS_ERROR;
-        $notes = trim($stderr) !== '' ? trim($stderr) : null;
+        if (is_file($summaryJson)) {
+            $summary = json_decode((string) file_get_contents($summaryJson), true);
+            if (is_array($summary)) {
+                $metrics = array_merge($metrics, array_diff_key($summary, array_flip(['skipped_reasons', 'generated_at'])));
+                if (isset($summary['skipped_reasons']) && is_array($summary['skipped_reasons'])) {
+                    $metrics['skipped_reasons'] = $summary['skipped_reasons'];
+                }
+            }
+        }
+
+        $status = ($skippedRows > 0) ? StageResult::STATUS_WARN : StageResult::STATUS_OK;
 
         return new StageResult(
             $status,
             $metrics,
             [
-                'imported_csv' => $runDir . '/final/imported.csv',
-                'updated_csv' => $runDir . '/final/updated.csv',
-                'skipped_csv' => $runDir . '/final/skipped.csv',
-                'stdout' => $stdout !== '' ? $this->writeArtifact($runDir, 'stage06.stdout.log', $stdout) : '',
-                'stderr' => $stderr !== '' ? $this->writeArtifact($runDir, 'stage06.stderr.log', $stderr) : '',
+                'resolved_jsonl' => $resolvedPath,
+                'import_ready_csv' => $importCsv,
+                'skipped_csv' => $skippedCsv,
+                'summary_json' => $summaryJson,
+                'log' => $logPath,
             ],
-            $notes
+            null
         );
     }
 
@@ -146,7 +159,7 @@ class Stage06 implements StageInterface
             return 0;
         }
         $count = 0;
-        while (($row = fgetcsv($fh)) !== false) {
+        while (($row = fgetcsv($fh, 0, ',', '"', '\\')) !== false) {
             $count++;
         }
         fclose($fh);
@@ -154,16 +167,5 @@ class Stage06 implements StageInterface
             $count--;
         }
         return $count;
-    }
-
-    private function writeArtifact(string $runDir, string $fileName, string $contents): string
-    {
-        $logsDir = $runDir . '/logs';
-        if (!is_dir($logsDir)) {
-            mkdir($logsDir, 0775, true);
-        }
-        $path = $logsDir . '/' . $fileName;
-        file_put_contents($path, $contents);
-        return $path;
     }
 }

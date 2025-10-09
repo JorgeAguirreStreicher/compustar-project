@@ -27,11 +27,24 @@ try {
             $runner = new Compu_Stage_Normalize();
             $runner->run($args);
             break;
-        case '03-validate':
-            require_once $rootDir . '/server-mirror/compu-import-lego/includes/stages/03-validate.php';
-            $runner = new Compu_Stage_Validate();
-            $runner->run($args);
-            break;
+    case '03-validate':
+        require_once $rootDir . '/server-mirror/compu-import-lego/includes/stages/03-validate.php';
+        $runner = new Compu_Stage_Validate();
+        $runner->run($args);
+        break;
+    case '04-resolve':
+    case '04-resolve-map':
+        require_once $rootDir . '/server-mirror/compu-import-lego/includes/stages/04-resolve-map.php';
+        $runner = new Compu_Stage_Resolve_Map();
+        $runner->run($args);
+        break;
+    case '06-package':
+    case '06-final':
+    case '06-products':
+        require_once $rootDir . '/server-mirror/compu-import-lego/includes/stages/06-products.php';
+        $runner = new Compu_Stage_Finalize();
+        $runner->run($args);
+        break;
         default:
             throw new RuntimeException("Stage desconocido: {$stage}");
     }

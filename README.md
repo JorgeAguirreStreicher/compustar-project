@@ -99,3 +99,37 @@ make stage01_02
 
 > Roles/RACI/DoD: ver documento “Equipo y responsabilidades” y la sección de operación del diario.
 <!-- END:CCX_REPOS_SUMMARY -->
+
+## Stage 04–06 (repo)
+
+### Requisitos
+- PHP 8+ con soporte para JSON y ext/mbstring.
+- `jq` y Python 3.8+ para verificaciones adicionales.
+
+### Comandos de ejemplo
+```bash
+bash tests/run_stage04_06.sh \
+  --csv /home/compustar/htdocs/ProductosHora.csv \
+  --from=1 --rows=500 \
+  --run-dir=tests/tmp/run-$(date +%s)
+
+# Verificar consistencia de llaves
+bash tests/check_schema_consistency.sh \
+  --run_dir=tests/tmp/run-<id>
+```
+
+### Artefactos esperados
+- `resolved.jsonl` con las mismas llaves que `validated.jsonl` más campos derivados (`cat_lvl*_id`, `stock_total`, `resolve_status`, `resolve_reason`).
+- `final/import-ready.csv`, `final/skipped.csv` y `final/summary.json` en el `RUN_DIR`.
+- Directorios de documentación en `docs/runs/<RUN_ID>/step-04/` y `docs/runs/<RUN_ID>/step-06/` con los CSV/JSON y logs correspondientes.
+
+### Checks obligatorios
+- `tests/check_schema_consistency.sh --run_dir=<RUN_DIR>` debe terminar con código 0.
+- Los CSV finales deben incluir encabezados en español normalizado y respetar el orden definido.
+- Los logs `logs/stage-04.log` y `logs/stage-06.log` deben existir y contener el resumen de cada etapa.
+- `final/summary.json` debe listar totales, importables, omitidos y razones de omisión.
+
+### Notas
+- El mapeo de menús se resuelve con `config/menu-map.json`. Agrega nuevas combinaciones ahí para habilitar categorías adicionales.
+- Stage 06 aplica reglas de negocio básicas: SKU y Título obligatorios, precio o stock presentes y categorías resueltas.
+- Los CSV finales pueden consumirse directamente por WooCommerce o revisarse manualmente antes de importar.

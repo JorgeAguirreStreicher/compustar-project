@@ -266,7 +266,7 @@ class StageKernel
         $stage02 = new Stage02();
         $stage03 = new Stage03();
         $stage04 = new Stage04();
-        $stage06 = new Stage06($this->phpBinary, $this->pluginDir . '/includes/stages/06-products.php');
+        $stage06 = new Stage06();
 
         foreach ([$stage01, $stage02, $stage03, $stage04, $stage06] as $handler) {
             $this->stageDefinitions[$handler->id()] = [
