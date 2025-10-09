@@ -1,0 +1,11 @@
+{
+  "default": {
+    "type": "PERCENT",
+    "value": 0.18
+  },
+  "rules": {
+    "101": {"type": "PERCENT", "value": 0.20},
+    "202": {"type": "PERCENT", "value": 0.25},
+    "303": {"type": "FIXED", "value": 150.0}
+  }
+}
