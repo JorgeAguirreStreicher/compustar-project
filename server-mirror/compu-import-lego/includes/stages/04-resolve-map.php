@@ -4,24 +4,47 @@ if (!defined('ABSPATH')) {
 }
 
 class Compu_Stage_Resolve_Map {
+  private const BLOCKED_LVL1_VALUES = ['---', '25'];
+
   /**
-   * Ejecuta la resolución de categorías a partir de validated.jsonl.
+   * @var array<string,bool>
+   */
+  private $sucursalColumns = [
+    'Chihuahua' => true,
+    'Cd_Juarez' => true,
+    'Guadalajara' => true,
+    'Los_Mochis' => true,
+    'Merida' => true,
+    'Mexico_Norte' => true,
+    'Mexico_Sur' => true,
+    'Monterrey' => true,
+    'Puebla' => true,
+    'Queretaro' => true,
+    'Villahermosa' => true,
+    'Leon' => true,
+    'Hermosillo' => true,
+    'San_Luis_Potosi' => true,
+    'Torreon' => true,
+    'Chihuahua_CEDIS' => true,
+    'Toluca' => true,
+    'Tijuana' => true,
+  ];
+
+  /**
+   * Ejecuta la resolución incorporando campos de almacén y bloqueos por categoría de nivel 1.
    *
    * @param array<string,mixed> $args
    */
   public function run($args) {
-    $runDir     = $this->resolveRunDirectory(is_array($args) ? $args : []);
-    $validated  = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'validated.jsonl';
-    $resolved   = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'resolved.jsonl';
-    $logDir     = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'logs';
+    $runDir   = $this->resolveRunDirectory(is_array($args) ? $args : []);
+    $validated = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'validated.jsonl';
+    $resolved  = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'resolved.jsonl';
+    $logDir    = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'logs';
     $metricsOut = rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'stage-04.metrics.json';
 
     if (!is_file($validated)) {
-      $this->cli_error("Falta validated.jsonl en {$runDir}. Ejecuta Stage 03 primero.");
+      $this->cli_error("Falta validated.jsonl en {$runDir}. Ejecuta Stage 03 antes de continuar.");
     }
-
-    $menuMapPath = $this->resolveMenuMapPath(is_array($args) ? $args : []);
-    $menuMap     = $this->loadMenuMap($menuMapPath);
 
     if (!is_dir($logDir) && !mkdir($logDir, 0777, true) && !is_dir($logDir)) {
       $this->cli_error("No se pudo crear el directorio de logs: {$logDir}");
@@ -46,128 +69,95 @@ class Compu_Stage_Resolve_Map {
       $this->cli_error('No se pudo crear resolved.jsonl para escritura.');
     }
 
-    $rowsTotal       = 0;
-    $rowsResolved    = 0;
-    $statusCounts    = ['ok' => 0, 'warn' => 0, 'error' => 0];
-    $missingMapLvl1  = 0;
-    $missingMapLvl2  = 0;
-    $missingMapLvl3  = 0;
+    $rowsIn         = 0;
+    $rowsOut        = 0;
+    $blockedLvl1    = 0;
+    $statusCounts   = [];
 
     while (($line = fgets($inputHandle)) !== false) {
       $line = trim($line);
       if ($line === '') {
         continue;
       }
-      $rowsTotal++;
+      $rowsIn++;
 
       $decoded = json_decode($line, true);
       if (!is_array($decoded)) {
-        $this->log($logHandle, 'error', 'Fila inválida: no se pudo decodificar JSON.', [
-          'row_number' => $rowsTotal,
+        $this->log($logHandle, 'error', 'Fila inválida: JSON no se pudo decodificar.', [
+          'row_number' => $rowsIn,
           'json_error' => json_last_error_msg(),
         ]);
-        $statusCounts['error']++;
         continue;
       }
 
-      $ids = [
-        'lvl1' => $this->normalizeId($decoded['ID_Menu_Nvl_1'] ?? null),
-        'lvl2' => $this->normalizeId($decoded['ID_Menu_Nvl_2'] ?? null),
-        'lvl3' => $this->normalizeId($decoded['ID_Menu_Nvl_3'] ?? null),
-      ];
+      $stockData = $this->calculateStocks($decoded);
+      $decoded['Almacen_15'] = $stockData['almacen_15'];
+      $decoded['Almacen_15_Tijuana'] = $stockData['almacen_15_tijuana'];
+      $decoded['stock_total'] = $stockData['total'];
 
-      $categoryResolution = $this->resolveCategories($menuMap, $ids);
-      $stockTotal         = $this->sumStockFields($decoded);
+      $idMenuLvl1 = $this->stringValue($decoded['ID_Menu_Nvl_1'] ?? null);
+      $status     = strtolower($this->stringValue($decoded['resolve_status'] ?? ''));
+      $reason     = $this->stringValue($decoded['resolve_reason'] ?? '');
 
-      $decoded['cat_lvl1_id'] = $categoryResolution['cat_lvl1_id'];
-      $decoded['cat_lvl2_id'] = $categoryResolution['cat_lvl2_id'];
-      $decoded['cat_lvl3_id'] = $categoryResolution['cat_lvl3_id'];
-      $decoded['stock_total'] = $stockTotal;
-      $decoded['resolve_status'] = $categoryResolution['status'];
+      if ($this->isBlockedLvl1($idMenuLvl1)) {
+        $status  = 'blocked_lvl1';
+        $reason  = 'ID_Menu_Nvl_1 in {---,25}';
+        $blockedLvl1++;
+      } elseif ($status === '') {
+        $status = 'ok';
+      }
 
-      if ($categoryResolution['reason'] !== null && $categoryResolution['reason'] !== '') {
-        $decoded['resolve_reason'] = $categoryResolution['reason'];
+      $decoded['resolve_status'] = $status;
+      if ($reason !== '') {
+        $decoded['resolve_reason'] = $reason;
       } elseif (isset($decoded['resolve_reason'])) {
         unset($decoded['resolve_reason']);
       }
 
-      if ($categoryResolution['status'] === 'error') {
-        $statusCounts['error']++;
-      } elseif ($categoryResolution['status'] === 'warn') {
-        $statusCounts['warn']++;
-      } else {
-        $statusCounts['ok']++;
+      if (!isset($statusCounts[$status])) {
+        $statusCounts[$status] = 0;
       }
-
-      if ($categoryResolution['missing_lvl1']) {
-        $missingMapLvl1++;
-      }
-      if ($categoryResolution['missing_lvl2']) {
-        $missingMapLvl2++;
-      }
-      if ($categoryResolution['missing_lvl3']) {
-        $missingMapLvl3++;
-      }
-
-      if ($categoryResolution['status'] !== 'ok') {
-        $this->log($logHandle, $categoryResolution['status'], 'Fila con incidencias en el mapeo.', [
-          'row_number' => $rowsTotal,
-          'ids'        => $ids,
-          'reason'     => $categoryResolution['reason'],
-        ]);
-      }
+      $statusCounts[$status]++;
 
       $encoded = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
       if ($encoded === false) {
         $this->log($logHandle, 'error', 'No se pudo codificar la fila resuelta.', [
-          'row_number' => $rowsTotal,
+          'row_number' => $rowsIn,
         ]);
-        $statusCounts['error']++;
         continue;
       }
 
       fwrite($outputHandle, $encoded . "\n");
-      $rowsResolved++;
+      $rowsOut++;
     }
 
     fclose($inputHandle);
     fclose($outputHandle);
 
-    $this->log($logHandle, 'info', 'Resumen Stage 04', [
-      'rows_total'      => $rowsTotal,
-      'rows_resolved'   => $rowsResolved,
-      'status_counts'   => $statusCounts,
-      'missing_map_lvl' => [
-        'lvl1' => $missingMapLvl1,
-        'lvl2' => $missingMapLvl2,
-        'lvl3' => $missingMapLvl3,
-      ],
-      'menu_map_path'   => $menuMapPath,
-    ]);
+    $summary = [
+      'rows_in'       => $rowsIn,
+      'rows_out'      => $rowsOut,
+      'blocked_lvl1'  => $blockedLvl1,
+      'status_counts' => $statusCounts,
+      'log_path'      => $logPath,
+      'resolved_path' => $resolved,
+    ];
 
+    $this->log($logHandle, 'info', 'Resumen Stage 04', $summary);
     fclose($logHandle);
 
-    $metrics = [
-      'generated_at'     => gmdate('c'),
-      'menu_map_path'    => $menuMapPath,
-      'rows_total'       => $rowsTotal,
-      'rows_resolved'    => $rowsResolved,
-      'status_counts'    => $statusCounts,
-      'missing_map_lvl1' => $missingMapLvl1,
-      'missing_map_lvl2' => $missingMapLvl2,
-      'missing_map_lvl3' => $missingMapLvl3,
-    ];
+    $metrics = array_merge($summary, [
+      'generated_at' => gmdate('c'),
+    ]);
 
     file_put_contents($metricsOut, json_encode($metrics, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
     $this->exportArtifacts($args, $runDir, $resolved, $logPath, $metricsOut, $metrics);
 
     $this->cli_success(sprintf(
-      'Stage 04 completado. Filas: %d (ok: %d, warn: %d, error: %d).',
-      $rowsTotal,
-      $statusCounts['ok'],
-      $statusCounts['warn'],
-      $statusCounts['error']
+      'Stage 04 completado. Filas procesadas: %d, bloqueadas lvl1: %d.',
+      $rowsIn,
+      $blockedLvl1
     ));
   }
 
@@ -200,292 +190,92 @@ class Compu_Stage_Resolve_Map {
   }
 
   /**
-   * @param array<string,mixed> $args
+   * @param array<string,mixed> $row
+   * @return array{almacen_15:float,almacen_15_tijuana:float,total:float}
    */
-  private function resolveMenuMapPath(array $args): string {
-    $candidates = [];
-    foreach (['menu-map', 'menu_map', 'map', 'config'] as $key) {
-      if (!empty($args[$key])) {
-        $candidates[] = (string) $args[$key];
-      }
-    }
+  private function calculateStocks(array $row): array {
+    $almacen15 = 0.0;
+    $almacen15Tijuana = 0.0;
 
-    if (empty($candidates)) {
-      $root = dirname(__DIR__, 4);
-      $candidates[] = rtrim($root, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'menu-map.json';
-    }
-
-    foreach ($candidates as $candidate) {
-      $candidate = trim($candidate);
-      if ($candidate === '') {
+    foreach ($row as $key => $value) {
+      $numeric = $this->toNumeric($value);
+      if ($numeric <= 0) {
         continue;
       }
-      if (is_file($candidate)) {
-        return $candidate;
-      }
-    }
 
-    $this->cli_error('No se encontró el archivo de mapeo de menús (menu-map.json).');
-    return '';
-  }
-
-  /**
-   * @return array<string,array{cat_id:int|null,children:array}>
-   */
-  private function loadMenuMap(string $path): array {
-    $contents = file_get_contents($path);
-    if ($contents === false) {
-      $this->cli_error("No se pudo leer el archivo de mapeo: {$path}");
-    }
-
-    $decoded = json_decode($contents, true);
-    if (!is_array($decoded)) {
-      $this->cli_error('menu-map.json tiene un formato inválido.');
-    }
-
-    if ($this->isFlatMapping($decoded)) {
-      return $this->buildNestedMapFromFlat($decoded);
-    }
-
-    return $this->sanitizeNestedMap($decoded);
-  }
-
-  /**
-   * @param mixed $data
-   */
-  private function isFlatMapping($data): bool {
-    if (!is_array($data)) {
-      return false;
-    }
-    if ($data === []) {
-      return false;
-    }
-    $first = reset($data);
-    return is_array($first) && array_key_exists('ID_Menu_Nvl_1', $first);
-  }
-
-  /**
-   * @param array<int,array<string,mixed>> $rows
-   * @return array<string,array{cat_id:int|null,children:array}>
-   */
-  private function buildNestedMapFromFlat(array $rows): array {
-    $result = [];
-    foreach ($rows as $row) {
-      if (!is_array($row)) {
-        continue;
-      }
-      $lvl1 = $this->normalizeId($row['ID_Menu_Nvl_1'] ?? null);
-      $lvl2 = $this->normalizeId($row['ID_Menu_Nvl_2'] ?? null);
-      $lvl3 = $this->normalizeId($row['ID_Menu_Nvl_3'] ?? null);
-
-      if (!isset($result[$lvl1])) {
-        $result[$lvl1] = ['cat_id' => $this->toInt($row['cat_lvl1_id'] ?? null), 'children' => []];
-      }
-      if (!isset($result[$lvl1]['children'][$lvl2])) {
-        $result[$lvl1]['children'][$lvl2] = ['cat_id' => $this->toInt($row['cat_lvl2_id'] ?? null), 'children' => []];
-      }
-      if (!isset($result[$lvl1]['children'][$lvl2]['children'][$lvl3])) {
-        $result[$lvl1]['children'][$lvl2]['children'][$lvl3] = ['cat_id' => $this->toInt($row['cat_lvl3_id'] ?? null), 'children' => []];
-      }
-    }
-    return $result;
-  }
-
-  /**
-   * @param array<string,mixed> $data
-   * @return array<string,array{cat_id:int|null,children:array}>
-   */
-  private function sanitizeNestedMap(array $data): array {
-    $result = [];
-    foreach ($data as $key => $node) {
-      if (!is_array($node)) {
-        continue;
-      }
-      $catId    = $this->toInt($node['cat_id'] ?? null);
-      $children = [];
-      if (isset($node['children']) && is_array($node['children'])) {
-        foreach ($node['children'] as $childKey => $childNode) {
-          $children[$this->normalizeId($childKey)] = $this->sanitizeNestedMap([$childKey => $childNode])[$this->normalizeId($childKey)];
-        }
-      }
-      $result[$this->normalizeId($key)] = [
-        'cat_id'   => $catId,
-        'children' => $children,
-      ];
-    }
-    return $result;
-  }
-
-  /**
-   * @param array<string,array{cat_id:int|null,children:array}> $map
-   * @param array{lvl1:string,lvl2:string,lvl3:string} $ids
-   * @return array{
-   *   cat_lvl1_id:int|null,
-   *   cat_lvl2_id:int|null,
-   *   cat_lvl3_id:int|null,
-   *   status:string,
-   *   reason:?string,
-   *   missing_lvl1:bool,
-   *   missing_lvl2:bool,
-   *   missing_lvl3:bool
-   * }
-   */
-  private function resolveCategories(array $map, array $ids): array {
-    $status       = 'ok';
-    $reasons      = [];
-    $cat1         = null;
-    $cat2         = null;
-    $cat3         = null;
-    $missingLvl1  = false;
-    $missingLvl2  = false;
-    $missingLvl3  = false;
-
-    if ($ids['lvl1'] === '') {
-      $status      = 'error';
-      $reasons[]   = 'missing_id_menu_lvl1';
-      $missingLvl1 = true;
-      return [
-        'cat_lvl1_id' => null,
-        'cat_lvl2_id' => null,
-        'cat_lvl3_id' => null,
-        'status'      => $status,
-        'reason'      => implode(';', $reasons),
-        'missing_lvl1'=> $missingLvl1,
-        'missing_lvl2'=> $missingLvl2,
-        'missing_lvl3'=> $missingLvl3,
-      ];
-    }
-
-    if (!isset($map[$ids['lvl1']])) {
-      $status      = 'error';
-      $reasons[]   = 'mapping_not_found_lvl1';
-      $missingLvl1 = true;
-    } else {
-      $cat1 = $map[$ids['lvl1']]['cat_id'];
-      if ($cat1 === null) {
-        $status      = 'warn';
-        $reasons[]   = 'cat_lvl1_id_missing';
-        $missingLvl1 = true;
-      }
-
-      if ($ids['lvl2'] !== '') {
-        if (isset($map[$ids['lvl1']]['children'][$ids['lvl2']])) {
-          $cat2 = $map[$ids['lvl1']]['children'][$ids['lvl2']]['cat_id'];
-          if ($cat2 === null) {
-            $status      = $status === 'error' ? 'error' : 'warn';
-            $reasons[]   = 'cat_lvl2_id_missing';
-            $missingLvl2 = true;
-          }
-
-          if ($ids['lvl3'] !== '') {
-            if (isset($map[$ids['lvl1']]['children'][$ids['lvl2']]['children'][$ids['lvl3']])) {
-              $cat3 = $map[$ids['lvl1']]['children'][$ids['lvl2']]['children'][$ids['lvl3']]['cat_id'];
-              if ($cat3 === null) {
-                $status      = $status === 'error' ? 'error' : 'warn';
-                $reasons[]   = 'cat_lvl3_id_missing';
-                $missingLvl3 = true;
-              }
-            } else {
-              $status      = $status === 'error' ? 'error' : 'warn';
-              $reasons[]   = 'mapping_not_found_lvl3';
-              $missingLvl3 = true;
-            }
-          }
+      if (isset($this->sucursalColumns[$key])) {
+        if ($key === 'Tijuana') {
+          $almacen15Tijuana += $numeric;
         } else {
-          $status      = $status === 'error' ? 'error' : 'warn';
-          $reasons[]   = 'mapping_not_found_lvl2';
-          $missingLvl2 = true;
-          if ($ids['lvl3'] !== '') {
-            $missingLvl3 = true;
-          }
+          $almacen15 += $numeric;
         }
-      } elseif ($ids['lvl3'] !== '') {
-        $status      = $status === 'error' ? 'error' : 'warn';
-        $reasons[]   = 'id_menu_lvl2_missing';
-        $missingLvl2 = true;
-        $missingLvl3 = true;
+        continue;
+      }
+
+      if (strpos((string) $key, 'Stock_') === 0) {
+        if (strcasecmp((string) $key, 'Stock_Tijuana') === 0) {
+          $almacen15Tijuana += $numeric;
+        } else {
+          $almacen15 += $numeric;
+        }
       }
     }
 
     return [
-      'cat_lvl1_id'  => $cat1,
-      'cat_lvl2_id'  => $cat2,
-      'cat_lvl3_id'  => $cat3,
-      'status'       => $status,
-      'reason'       => $reasons ? implode(';', array_unique($reasons)) : null,
-      'missing_lvl1' => $missingLvl1,
-      'missing_lvl2' => $missingLvl2,
-      'missing_lvl3' => $missingLvl3,
+      'almacen_15' => $this->roundNumber($almacen15),
+      'almacen_15_tijuana' => $this->roundNumber($almacen15Tijuana),
+      'total' => $this->roundNumber($almacen15 + $almacen15Tijuana),
     ];
   }
 
-  private function normalizeId($value): string {
+  private function toNumeric($value): float {
+    if ($value === null || $value === '') {
+      return 0.0;
+    }
+    if (is_int($value) || is_float($value)) {
+      $numeric = (float) $value;
+    } elseif (is_string($value)) {
+      $clean = preg_replace('/[^0-9.,-]/', '', $value);
+      if ($clean === null || $clean === '' || $clean === '-') {
+        return 0.0;
+      }
+      $clean = str_replace(',', '', $clean);
+      if ($clean === '' || $clean === '-' || !is_numeric($clean)) {
+        return 0.0;
+      }
+      $numeric = (float) $clean;
+    } else {
+      return 0.0;
+    }
+
+    if (!is_finite($numeric) || $numeric <= 0) {
+      return 0.0;
+    }
+
+    return $numeric;
+  }
+
+  private function roundNumber(float $value): float {
+    return (float) sprintf('%.4f', max(0.0, $value));
+  }
+
+  private function stringValue($value): string {
     if ($value === null) {
       return '';
     }
-    $value = trim((string) $value);
-    if ($value === '' || $value === '---' || $value === 'N/A') {
-      return '';
-    }
-    return $value;
+    return trim((string) $value);
   }
 
-  private function toInt($value): ?int {
-    if ($value === null || $value === '' || $value === 'null') {
-      return null;
+  private function isBlockedLvl1(string $value): bool {
+    if ($value === '') {
+      return false;
     }
-    if (is_int($value)) {
-      return $value;
-    }
-    if (is_numeric($value)) {
-      return (int) $value;
-    }
-    if (is_string($value)) {
-      $filtered = preg_replace('/[^0-9\-]/', '', $value);
-      if ($filtered === '' || $filtered === '-' || $filtered === null) {
-        return null;
-      }
-      return (int) $filtered;
-    }
-    return null;
-  }
-
-  /**
-   * @param array<string,mixed> $row
-   */
-  private function sumStockFields(array $row): float {
-    $total = 0.0;
-    foreach ($row as $key => $value) {
-      if (strpos((string) $key, 'Stock_') !== 0) {
-        continue;
-      }
-      $numeric = $this->toFloat($value);
-      if ($numeric !== null) {
-        $total += $numeric;
+    foreach (self::BLOCKED_LVL1_VALUES as $blocked) {
+      if (strcasecmp($value, $blocked) === 0) {
+        return true;
       }
     }
-    return round($total, 4);
-  }
-
-  private function toFloat($value): ?float {
-    if ($value === null || $value === '') {
-      return null;
-    }
-    if (is_numeric($value)) {
-      return (float) $value;
-    }
-    if (is_string($value)) {
-      $clean = preg_replace('/[^0-9.,-]/', '', $value);
-      if ($clean === null || $clean === '') {
-        return null;
-      }
-      $clean = str_replace(',', '', $clean);
-      if ($clean === '' || $clean === '-' || $clean === null) {
-        return null;
-      }
-      return (float) $clean;
-    }
-    return null;
+    return false;
   }
 
   /**
@@ -570,19 +360,19 @@ class Compu_Stage_Resolve_Map {
    */
   private function generateReadme(string $path, array $metrics): void {
     $lines   = [];
-    $lines[] = '# Stage 04 - Resolución de categorías';
+    $lines[] = '# Stage 04 - Resolución y cálculo de almacenes';
     $lines[] = '';
-    $lines[] = sprintf('* Archivo de mapeo: `%s`', basename((string) ($metrics['menu_map_path'] ?? 'menu-map.json')));
-    $lines[] = sprintf('* Filas procesadas: %d', (int) ($metrics['rows_total'] ?? 0));
-    $lines[] = sprintf('* Filas escritas: %d', (int) ($metrics['rows_resolved'] ?? 0));
+    $lines[] = sprintf('* Filas procesadas: %d', (int) ($metrics['rows_in'] ?? 0));
+    $lines[] = sprintf('* Filas escritas: %d', (int) ($metrics['rows_out'] ?? 0));
+    $lines[] = sprintf('* Bloqueadas nivel 1: %d', (int) ($metrics['blocked_lvl1'] ?? 0));
     if (isset($metrics['status_counts']) && is_array($metrics['status_counts'])) {
       $lines[] = '* Conteo por estado:';
-      foreach (['ok', 'warn', 'error'] as $status) {
-        $lines[] = sprintf('  * %s: %d', strtoupper($status), (int) ($metrics['status_counts'][$status] ?? 0));
+      foreach ($metrics['status_counts'] as $status => $count) {
+        $lines[] = sprintf('  * %s: %d', $status, (int) $count);
       }
     }
     $lines[] = '';
-    $lines[] = 'Los archivos en este directorio corresponden a un subconjunto generado por Stage 04 en modo sandbox.';
+    $lines[] = 'Los archivos de este directorio corresponden al resultado del Stage 04 en modo sandbox.';
 
     file_put_contents($path, implode("\n", $lines) . "\n");
   }

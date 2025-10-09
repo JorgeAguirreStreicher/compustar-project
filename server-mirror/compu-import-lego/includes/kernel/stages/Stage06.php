@@ -103,7 +103,17 @@ class Stage06 implements StageInterface
             }
         }
 
-        $status = ($skippedRows > 0) ? StageResult::STATUS_WARN : StageResult::STATUS_OK;
+        $status = StageResult::STATUS_OK;
+        if ($skippedRows > 0) {
+            $skippedReasons = $metrics['skipped_reasons'] ?? [];
+            $blockedCount = 0;
+            if (is_array($skippedReasons) && isset($skippedReasons['blocked_lvl1'])) {
+                $blockedCount = (int) $skippedReasons['blocked_lvl1'];
+            }
+            if ($blockedCount !== $skippedRows) {
+                $status = StageResult::STATUS_WARN;
+            }
+        }
 
         return new StageResult(
             $status,
