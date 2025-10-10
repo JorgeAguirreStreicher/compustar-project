@@ -2,8 +2,10 @@
 
 require_once dirname(__DIR__) . '/compu-media-helpers.php';
 
+// Cuando se ejecuta vía `wp eval-file` desde el orquestador puede que la
+// constante aún no exista; la definimos para garantizar la ejecución del stage.
 if (!defined('COMP_RUN_STAGE')) {
-  return;
+  define('COMP_RUN_STAGE', true);
 }
 
 // Guard: solo ejecuta en WP-CLI (no en web)
@@ -95,6 +97,21 @@ function compu_stage07_normalize_gallery($raw): array
   }
 
   return array_keys($urls);
+}
+
+/**
+ * Calcula rápidamente la cantidad de líneas de un archivo sin cargarlo a
+ * memoria. Usado únicamente para propósitos de logging.
+ */
+function compu_stage07_count_lines(string $path): int
+{
+  try {
+    $file = new SplFileObject($path, 'r');
+    $file->seek(PHP_INT_MAX);
+    return $file->key() + 1;
+  } catch (Throwable $e) {
+    return 0;
+  }
 }
 
 /**
@@ -290,7 +307,20 @@ if (!$outputHandle) {
   exit(1);
 }
 
-compu_stage07_log("Inicio Stage 07 - run=$run input=$inputPath");
+$expectedLines = compu_stage07_count_lines($inputPath);
+$startMessage = sprintf(
+  'Inicio Stage 07 - run=%s input=%s expected_lines=%d',
+  $run,
+  $inputPath,
+  $expectedLines
+);
+compu_stage07_log($startMessage);
+echo sprintf(
+  '[07] Start media manifest (run=%s input=%s expected_lines=%d)' . "\n",
+  $run,
+  $inputPath,
+  $expectedLines
+);
 
 $total = 0;
 $okCount = 0;
@@ -396,7 +426,15 @@ while (($line = fgets($inputHandle)) !== false) {
     continue;
   }
 
-  fwrite($outputHandle, $encoded . "\n");
+  $bytesWritten = fwrite($outputHandle, $encoded . "\n");
+  if ($bytesWritten === false) {
+    compu_stage07_log("Fila $total: error al escribir salida para SKU $sku");
+    fclose($inputHandle);
+    fclose($outputHandle);
+    fclose($logHandle);
+    fwrite(STDERR, "[07] Error al escribir media.jsonl (SKU $sku)\n");
+    exit(1);
+  }
   $written++;
 
   if ($total % 20 === 0) {
