@@ -1,6 +1,7 @@
 <?php
 
-require_once dirname(__DIR__) . '/compu-media-helpers.php';
+require_once dirname(__DIR__) . '/helpers/helpers-common.php';
+require_once dirname(__DIR__) . '/helpers/helpers-media.php';
 
 // Cuando se ejecuta vía `wp eval-file` desde el orquestador puede que la
 // constante aún no exista; la definimos para garantizar la ejecución del stage.
@@ -15,6 +16,95 @@ if (php_sapi_name() !== 'cli' && (!defined('WP_CLI') || !WP_CLI)) {
 
 if (!function_exists('wp_remote_head') || !function_exists('wp_remote_get')) {
   require_once ABSPATH . WPINC . '/http.php';
+}
+
+// -------------------------------------------------------------------------
+// Logger encapsulado
+// -------------------------------------------------------------------------
+
+class CompuStage07Logger
+{
+  /** @var resource|null */
+  private static $handle = null;
+
+  /** @var string */
+  private static $destination = 'stdout';
+
+  /** @var bool */
+  private static $initialized = false;
+
+  public static function bootstrap(?string $runDir): void
+  {
+    if (self::$initialized) {
+      return;
+    }
+
+    self::$initialized = true;
+    $targetHandle = null;
+    $destination = 'stdout';
+
+    if ($runDir && is_dir($runDir)) {
+      $logsDir = rtrim($runDir, '/') . '/logs';
+      if (!is_dir($logsDir)) {
+        if (!@mkdir($logsDir, 0775, true) && !is_dir($logsDir)) {
+          fwrite(STDERR, "[07] WARN: no se pudo crear el directorio de logs ($logsDir); se usará stdout\n");
+        }
+      }
+
+      if (is_dir($logsDir) && is_writable($logsDir)) {
+        $logPath = $logsDir . '/stage-07.log';
+        $targetHandle = @fopen($logPath, 'a');
+        if (!$targetHandle) {
+          fwrite(STDERR, "[07] WARN: no se pudo abrir el log ($logPath); se usará stdout\n");
+        } else {
+          $destination = 'file';
+        }
+      } elseif ($runDir) {
+        fwrite(STDERR, "[07] WARN: directorio de logs no escribible ($logsDir); se usará stdout\n");
+      }
+    }
+
+    if (!$targetHandle) {
+      $targetHandle = @fopen('php://stdout', 'w');
+      if (!$targetHandle) {
+        $targetHandle = STDOUT;
+      }
+    }
+
+    self::$handle = $targetHandle;
+    self::$destination = $destination;
+  }
+
+  public static function log(string $message): void
+  {
+    if (!self::$initialized) {
+      self::bootstrap(null);
+    }
+
+    $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . "\n";
+    $handle = self::$handle;
+    if (!is_resource($handle)) {
+      $handle = @fopen('php://stdout', 'w');
+      if (!$handle) {
+        $handle = STDOUT;
+      }
+      self::$handle = $handle;
+      self::$destination = 'stdout';
+    }
+
+    @fwrite($handle, $line);
+  }
+
+  public static function shutdown(): void
+  {
+    if (self::$initialized && is_resource(self::$handle) && self::$destination === 'file') {
+      @fclose(self::$handle);
+    }
+
+    self::$handle = null;
+    self::$initialized = false;
+    self::$destination = 'stdout';
+  }
 }
 
 /**
@@ -155,7 +245,22 @@ function compu_stage07_check_url(string $url): array
     ],
   ];
 
-  $response = wp_remote_head($url, $args);
+  $attempts = 0;
+  $maxAttempts = 2;
+  $delay = 1;
+
+  do {
+    $attempts++;
+    $response = wp_remote_head($url, $args);
+
+    if (is_wp_error($response) && compu_stage07_is_timeout($response) && $attempts < $maxAttempts) {
+      sleep($delay);
+      $delay *= 2;
+      continue;
+    }
+
+    break;
+  } while ($attempts < $maxAttempts);
 
   if (is_wp_error($response)) {
     if (compu_stage07_is_timeout($response)) {
@@ -198,7 +303,21 @@ function compu_stage07_check_url(string $url): array
     $getArgs['method'] = 'GET';
     $getArgs['headers']['Range'] = 'bytes=0-4096';
 
-    $response = wp_remote_get($url, $getArgs);
+    $attempts = 0;
+    $delay = 1;
+
+    do {
+      $attempts++;
+      $response = wp_remote_get($url, $getArgs);
+
+      if (is_wp_error($response) && compu_stage07_is_timeout($response) && $attempts < $maxAttempts) {
+        sleep($delay);
+        $delay *= 2;
+        continue;
+      }
+
+      break;
+    } while ($attempts < $maxAttempts);
 
     if (is_wp_error($response)) {
       if (compu_stage07_is_timeout($response)) {
@@ -245,36 +364,24 @@ function compu_stage07_check_url(string $url): array
 // Resolución de RUN / archivos de entrada
 // -------------------------------------------------------------------------
 
-$run = rtrim(getenv('RUN_DIR') ?: getenv('RUN_PATH') ?: '', '/');
+$run = rtrim(compu_import_resolve_run_dir(), '/');
 if ($run === '' || !is_dir($run)) {
   fwrite(STDERR, "[07] RUN_DIR/RUN_PATH vacío o inválido\n");
+  CompuStage07Logger::bootstrap(null);
+  CompuStage07Logger::log('RUN_DIR ausente; abortando Stage 07');
+  CompuStage07Logger::shutdown();
   exit(1);
 }
 
 if (!is_writable($run)) {
   fwrite(STDERR, "[07] RUN_DIR no es escribible: $run\n");
+  CompuStage07Logger::bootstrap($run);
+  CompuStage07Logger::log('RUN_DIR no escribible; abortando Stage 07');
+  CompuStage07Logger::shutdown();
   exit(1);
 }
 
-$logsDir = $run . '/logs';
-if (!is_dir($logsDir) && !@mkdir($logsDir, 0775, true) && !is_dir($logsDir)) {
-  fwrite(STDERR, "[07] No se pudo crear el directorio de logs: $logsDir\n");
-  exit(1);
-}
-
-$logPath = $logsDir . '/stage-07.log';
-$logHandle = @fopen($logPath, 'a');
-if (!$logHandle) {
-  fwrite(STDERR, "[07] No se pudo abrir el log: $logPath\n");
-  exit(1);
-}
-
-function compu_stage07_log(string $message): void
-{
-  global $logHandle;
-  $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . "\n";
-  fwrite($logHandle, $line);
-}
+CompuStage07Logger::bootstrap($run);
 
 $resolvedPath = $run . '/resolved.jsonl';
 $validatedPath = $run . '/validated.jsonl';
@@ -284,17 +391,19 @@ if (is_readable($resolvedPath)) {
   $inputPath = $resolvedPath;
 } elseif (is_readable($validatedPath)) {
   $inputPath = $validatedPath;
-  compu_stage07_log('WARN: No se encontró resolved.jsonl, usando validated.jsonl');
+  CompuStage07Logger::log('WARN: No se encontró resolved.jsonl, usando validated.jsonl');
 } else {
   fwrite(STDERR, "[07] No existe resolved.jsonl ni validated.jsonl en $run\n");
-  fclose($logHandle);
+  CompuStage07Logger::log('No se encontraron archivos de entrada requeridos');
+  CompuStage07Logger::shutdown();
   exit(1);
 }
 
 $inputHandle = @fopen($inputPath, 'r');
 if (!$inputHandle) {
   fwrite(STDERR, "[07] No se pudo abrir el origen: $inputPath\n");
-  fclose($logHandle);
+  CompuStage07Logger::log('No se pudo abrir el archivo de entrada: ' . $inputPath);
+  CompuStage07Logger::shutdown();
   exit(1);
 }
 
@@ -303,7 +412,8 @@ $outputHandle = @fopen($outputPath, 'w');
 if (!$outputHandle) {
   fwrite(STDERR, "[07] No se pudo crear el archivo de salida: $outputPath\n");
   fclose($inputHandle);
-  fclose($logHandle);
+  CompuStage07Logger::log('No se pudo crear el archivo de salida: ' . $outputPath);
+  CompuStage07Logger::shutdown();
   exit(1);
 }
 
@@ -314,7 +424,7 @@ $startMessage = sprintf(
   $inputPath,
   $expectedLines
 );
-compu_stage07_log($startMessage);
+CompuStage07Logger::log($startMessage);
 echo sprintf(
   '[07] Start media manifest (run=%s input=%s expected_lines=%d)' . "\n",
   $run,
@@ -338,7 +448,7 @@ while (($line = fgets($inputHandle)) !== false) {
   $row = json_decode($line, true);
   if (!is_array($row)) {
     $errorCount++;
-    compu_stage07_log("Fila $total: JSON inválido, se omite");
+    CompuStage07Logger::log("Fila $total: JSON inválido, se omite");
     continue;
   }
 
@@ -346,7 +456,7 @@ while (($line = fgets($inputHandle)) !== false) {
   $sku = is_string($skuRaw) ? trim($skuRaw) : '';
   if ($sku === '') {
     $errorCount++;
-    compu_stage07_log("Fila $total: sin SKU, se omite");
+    CompuStage07Logger::log("Fila $total: sin SKU, se omite");
     continue;
   }
 
@@ -383,11 +493,11 @@ while (($line = fgets($inputHandle)) !== false) {
     }
   } else {
     if (!preg_match('~^https?://~i', $imageUrl) || !filter_var($imageUrl, FILTER_VALIDATE_URL)) {
-      $imageStatus = 'invalid_url';
+      $imageStatus = 'error';
       $notes = 'URL inválida';
     } else {
       $check = compu_stage07_check_url($imageUrl);
-      $imageStatus = $check['status'];
+      $imageStatus = $check['status'] === 'ok' ? 'ok' : 'error';
       $notes = $check['note'];
     }
   }
@@ -407,12 +517,15 @@ while (($line = fgets($inputHandle)) !== false) {
   }
 
   $record = [
-    'sku'           => $sku,
-    'image_url'     => $imageUrl,
-    'gallery_urls'  => array_values($galleryUrls),
-    'image_status'  => $imageStatus,
-    'source'        => 'url',
+    'sku'          => $sku,
+    'image_url'    => $imageUrl,
+    'image_status' => $imageStatus,
+    'source'       => $imageUrl ? 'url' : 'none',
   ];
+
+  if (!empty($galleryUrls)) {
+    $record['gallery_urls'] = array_values($galleryUrls);
+  }
 
   if ($notes !== null && $notes !== '') {
     $record['notes'] = $notes;
@@ -422,23 +535,23 @@ while (($line = fgets($inputHandle)) !== false) {
   $encoded = json_encode($record, $jsonOptions);
   if ($encoded === false) {
     $errorCount++;
-    compu_stage07_log("Fila $total: no se pudo codificar JSON para SKU $sku");
+    CompuStage07Logger::log("Fila $total: no se pudo codificar JSON para SKU $sku");
     continue;
   }
 
   $bytesWritten = fwrite($outputHandle, $encoded . "\n");
   if ($bytesWritten === false) {
-    compu_stage07_log("Fila $total: error al escribir salida para SKU $sku");
+    CompuStage07Logger::log("Fila $total: error al escribir salida para SKU $sku");
     fclose($inputHandle);
     fclose($outputHandle);
-    fclose($logHandle);
     fwrite(STDERR, "[07] Error al escribir media.jsonl (SKU $sku)\n");
+    CompuStage07Logger::shutdown();
     exit(1);
   }
   $written++;
 
   if ($total % 20 === 0) {
-    compu_stage07_log(
+    CompuStage07Logger::log(
       sprintf(
         'Progreso: processed=%d ok=%d missing=%d errors=%d (SKU=%s, Marca=%s, Titulo=%s)',
         $total,
@@ -458,7 +571,8 @@ fclose($outputHandle);
 
 if (!file_exists($outputPath)) {
   fwrite(STDERR, "[07] No se generó media.jsonl en $run\n");
-  fclose($logHandle);
+  CompuStage07Logger::log('media.jsonl no existe tras el procesamiento');
+  CompuStage07Logger::shutdown();
   exit(1);
 }
 
@@ -467,7 +581,7 @@ if ($written === 0) {
   touch($outputPath);
 }
 
-compu_stage07_log(
+CompuStage07Logger::log(
   sprintf(
     'Fin Stage 07: total=%d ok=%d missing=%d errors=%d salida=%s',
     $total,
@@ -478,7 +592,7 @@ compu_stage07_log(
   )
 );
 
-fclose($logHandle);
+CompuStage07Logger::shutdown();
 
 $summary = sprintf(
   '[07] Wrote %s (lines=%d, ok=%d, missing=%d, errors=%d)',

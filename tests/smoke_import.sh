@@ -18,7 +18,7 @@ if [[ ! -x "$RUNNER" ]]; then
   exit 1
 fi
 
-MODE="rows"
+MODE="random50"
 RUNNER_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -118,6 +118,35 @@ MEDIA="$RUN_DIR/media.jsonl"
 if [[ -f "$MEDIA" ]]; then
   echo "-- media.jsonl (primeras 3 líneas) --"
   head -n 3 "$MEDIA"
+  media_lines=$(wc -l < "$MEDIA")
+  if (( media_lines <= 0 )); then
+    echo "media.jsonl está vacío" >&2
+    exit 1
+  fi
+
+  input_jsonl=""
+  if [[ -f "$RUN_DIR/resolved.jsonl" ]]; then
+    input_jsonl="$RUN_DIR/resolved.jsonl"
+  elif [[ -f "$RUN_DIR/validated.jsonl" ]]; then
+    input_jsonl="$RUN_DIR/validated.jsonl"
+  fi
+
+  if [[ -n "$input_jsonl" ]]; then
+    input_lines=$(wc -l < "$input_jsonl")
+    echo "media.jsonl líneas: $media_lines (input: $input_lines)"
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
+    if ! head -n 3 "$MEDIA" | jq -e 'if has("sku") and has("image_status") and has("source") then empty else error("missing fields") end' >/dev/null; then
+      echo "media.jsonl carece de llaves obligatorias" >&2
+      exit 1
+    fi
+  else
+    echo "jq no disponible; omitiendo validación estructural de media.jsonl" >&2
+  fi
+else
+  echo "-- media.jsonl no encontrado --"
+  exit 1
 fi
 
 for stage_log in stage10 stage11; do
