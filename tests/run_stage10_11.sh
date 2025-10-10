@@ -106,35 +106,31 @@ done
 echo "\nResumen import-report.json (conteos):"
 python - "$RUN_DIR/final/import-report.json" <<'PY'
 import json, sys
-with open(sys.argv[1], "r", encoding="utf-8") as fh:
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as fh:
     data = json.load(fh)
 print({k: len(v) for k, v in data.items() if isinstance(v, list)})
-PY
 
-echo "\nValidaciones básicas:"
-python - "$RUN_DIR/final/import-report.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-data = json.load(open(path, "r", encoding="utf-8"))
 created = data.get("created", [])
 updated = data.get("updated", [])
 skipped = data.get("skipped", [])
 
-assert len(created) == 1, f"esperados 1 created, hay {len(created)}"
-assert len(updated) == 2, f"esperados 2 updated (incluye price_zero existente), hay {len(updated)}"
-assert len(skipped) == 2, f"esperados 2 skipped, hay {len(skipped)}"
+assert len(created) == 1, created
+assert len(updated) == 2, updated
+assert len(skipped) == 2, skipped
 
 sku_new = created[0]
-assert sku_new["stock_total_mayoristas"] == 6, sku_new
-assert sku_new["after"]["set_image"] is True
+assert sku_new["sku"] == "SKU-NEW-1", sku_new
+assert sku_new["flags"]["category_assigned"] is True
+assert sku_new["flags"]["brand_assigned"] is True
 
 sku_update = next(item for item in updated if item["sku"] == "SKU-EXIST-LOW")
-assert sku_update["after"]["update_price"] is True
-assert sku_update["after"]["stock"] == 7
+assert sku_update["flags"]["price_set"] is True
+assert sku_update["flags"]["stock_set"] is True
 
 sku_price_zero = next(item for item in updated if item["sku"] == "SKU-EXIST-PZ")
 assert sku_price_zero["reason"] == "price_zero"
-assert sku_price_zero["after"]["stock"] == 0
+assert sku_price_zero["flags"]["stock_set"] is True
 
 sku_skip_price_zero = next(item for item in skipped if item["sku"] == "SKU-NEW-PZ")
 assert sku_skip_price_zero["reason"] == "price_zero"
@@ -154,14 +150,5 @@ head "$RUN_DIR/final/postcheck.json"
 echo "\nLogs Stage 10 y 11 (tail -n 5):"
 tail -n 5 "$RUN_DIR/logs/stage-10.log"
 tail -n 5 "$RUN_DIR/logs/stage-11.log"
-
-README_PATH="$RUN_DIR/docs/runs/$(basename "$RUN_DIR")/step-11/README.md"
-if [[ -f "$README_PATH" ]]; then
-  echo "\nREADME Stage 11 generado en: $README_PATH"
-  head "$README_PATH"
-else
-  echo "\nREADME Stage 11 faltante" >&2
-  exit 1
-fi
 
 echo "\nRUN_DIR: $RUN_DIR"

@@ -133,3 +133,57 @@ bash tests/check_schema_consistency.sh \
 - El mapeo de menús se resuelve con `config/menu-map.json`. Agrega nuevas combinaciones ahí para habilitar categorías adicionales.
 - Stage 06 aplica reglas de negocio básicas: SKU y Título obligatorios, precio o stock presentes y categorías resueltas.
 - Los CSV finales pueden consumirse directamente por WooCommerce o revisarse manualmente antes de importar.
+
+## Stage 10–11 (writer=wp)
+
+### Requisitos
+
+- WordPress productivo accesible en `/home/compustar/htdocs` con WP-CLI operativo.
+- Variables de entorno `WP_PATH` y `WP_PATH_ARGS` configuradas (por defecto `wp` y `--path=/home/compustar/htdocs --no-color`).
+- Salida de Stage 09 consolidada en `media.jsonl` (200 registros tomados a partir de la fila 1000 para ejercicios completos).
+
+### Ejecución recomendada
+
+```bash
+RUN_DIR="/tmp/run-$(date +%s)"
+mkdir -p "$RUN_DIR"/logs "$RUN_DIR"/final
+cp /ruta/a/media.jsonl "$RUN_DIR"/
+
+python3 python/stage10_import.py \
+  --run-dir "$RUN_DIR" \
+  --input "$RUN_DIR/media.jsonl" \
+  --log "$RUN_DIR/logs/stage-10.log" \
+  --report "$RUN_DIR/final/import-report.json" \
+  --dry-run 0 \
+  --writer wp \
+  --wp-path "${WP_PATH:-wp}" \
+  --wp-args "${WP_PATH_ARGS:---path=/home/compustar/htdocs --no-color}"
+
+python3 python/stage11_postcheck.py \
+  --run-dir "$RUN_DIR" \
+  --import-report "$RUN_DIR/final/import-report.json" \
+  --postcheck "$RUN_DIR/final/postcheck.json" \
+  --log "$RUN_DIR/logs/stage-11.log" \
+  --dry-run 0 \
+  --writer wp \
+  --wp-path "${WP_PATH:-wp}" \
+  --wp-args "${WP_PATH_ARGS:---path=/home/compustar/htdocs --no-color}"
+```
+
+### Guardas y reglas clave
+
+- No se crean productos nuevos si `stock_total_mayoristas == 0` o si `price_16_final == 0`.
+- Si el precio objetivo es 0 y el producto ya existe, se fuerza `stock=0` y estado `outofstock` sin subir precio.
+- Los precios sólo se actualizan si el nuevo valor no incrementa el precio ya publicado.
+- Se asegura categoría (ID_Menu_Nvl_3), marca (`product_brand`) e imagen destacada si faltan.
+- `_weight` se sincroniza desde `Peso_Kg` y `_stock` siempre refleja la suma total de mayoristas.
+- Cuando existen tablas espejo `wp_compu_*`, se realiza un UPSERT con `run_id` y se reporta si alguna quedó parcial.
+
+### Artefactos y auditoría
+
+- `logs/stage-10.log`: detalle por SKU (acción, reutilización de términos, guardas aplicadas, estado de mirrors).
+- `final/import-report.json`: lista por SKU con `action`, `reason` (cuando aplica) y `flags` (`category_assigned`, `brand_assigned`, `price_set`, `mirror_written`, etc.).
+- `logs/stage-11.log`: resumen de la muestra auditada (20 SKUs) y diferencias detectadas.
+- `final/postcheck.json`: `{ mode: "wp", writer: "wp", diffs: <n>, checks: { ... } }` con resultados agregados.
+
+Revisar manualmente una muestra en WooCommerce (ID, categoría, marca, imagen y metas `_price`, `_stock`, `_weight`) para confirmar que Stage 11 cierre sin diferencias (`diffs: 0`).
