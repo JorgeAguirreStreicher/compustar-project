@@ -107,7 +107,7 @@ Artefactos adicionales generados por etapas intermedias: `final/unmapped.csv`, `
 ## 6. Logs y monitoreo
 
 - Master log: `$RUN_DIR/logs/master.log`
-- Logs por stage: `$RUN_DIR/logs/<stage>.log` (por ejemplo `01-fetch.log`, `07-media.log`)
+- Logs por stage: `$RUN_DIR/logs/<stage>.log` (por ejemplo `01-fetch.log`, `stage-07.log`)
 - Logs especiales: Stage 07 escribe `stage-07.log`, Stage 10 y 11 generan sus propios logs definidos por CLI.
 
 Para ver las últimas líneas de un stage:
@@ -124,7 +124,7 @@ tail -n 200 "$RUN_DIR/logs/master.log"
 
 | Síntoma                              | Acción recomendada |
 |-------------------------------------|---------------------|
-| Falta `media.jsonl` tras Stage 07   | Verificar que `RUN_DIR` y `RUN_PATH` estén exportadas; revisar `$RUN_DIR/logs/07-media.log` para errores de WooCommerce. |
+| Falta `media.jsonl` tras Stage 07   | Verificar que `RUN_DIR` y `RUN_PATH` estén exportadas; revisar `$RUN_DIR/logs/stage-07.log` para errores de WooCommerce. |
 | Stage 04 falla con `term_not_found` | Confirmar que la vista `wp_compu_cats_map` exista y contenga datos; validar la tabla `compu_cats_map`. |
 | `--wp-args` no aplicado             | Usar sintaxis con `=`: `--wp-args="--no-color"`. |
 | WP-CLI no encuentra instalación     | Ajustar `--wp-path` o `WP` en `.env`. |
@@ -147,13 +147,13 @@ jq -r 'select(.resolution != "mapped") | .sku' "$RUN_DIR/resolved.jsonl"
   - `validated.jsonl` (fallback; se registra `WARN` en el log si se usa).
 - **Salidas:**
   - `media.jsonl` en el `RUN_DIR` actual.
-  - Log detallado en `$RUN_DIR/logs/stage-07.log` y mensajes de progreso por STDOUT.
+  - Log detallado en `$RUN_DIR/logs/stage-07.log`; si no puede escribirse cae de manera segura a `php://stdout`.
 - **Variables de entorno:** `RUN_DIR` (preferido) y `RUN_PATH` (respaldo si el primero está vacío).
-- **Estructura de `media.jsonl`:** una línea JSON por SKU con las llaves `sku`, `image_url`, `gallery_urls` (array), `image_status` (`ok`, `missing`, `invalid_url`, `http_error`, `timeout`), `source` (`url`/`file`) y `notes` opcional. No hay encabezados ni arrays envolventes.
+- **Estructura de `media.jsonl`:** una línea JSON por SKU con las llaves `sku`, `image_url`, `gallery_urls` (array opcional), `image_status` (`ok`, `missing`, `error`), `source` (`url`/`downloaded`/`none`) y `notes` opcional. No hay encabezados ni arrays envolventes.
 - **Validaciones clave:**
   - Verifica que el `RUN_DIR` exista y sea escribible; si no, aborta con código 1.
   - Falla explícitamente si no encuentra archivo de entrada o no puede crear/escribir `media.jsonl`.
-  - Evalúa URLs con `wp_remote_head()` y fallback `wp_remote_get()` (timeout 8 s, máximo 3 redirecciones, cuerpo limitado a 32 KB) para clasificar el estado de cada imagen.
+  - Evalúa URLs con `wp_remote_head()` y fallback `wp_remote_get()` (timeout 8 s, máximo 3 redirecciones, cuerpo limitado a 32 KB) con reintentos exponenciales (hasta 2) ante timeouts para clasificar el estado de cada imagen.
   - Registra progreso cada 20 registros y resume totales al finalizar (`ok`, `missing`, `errors`).
 
 Ejemplos útiles:
@@ -202,11 +202,12 @@ Para entornos donde se prefiera systemd, se incluyen unidades de referencia en `
 
 ## 11. Smoke test
 
-El script `tests/smoke_import.sh` permite validar rápidamente la configuración local usando un subconjunto de filas (`1000-1050`). Tras completarse, muestra un resumen de artefactos y un extracto de `import-report.json`.
+El script `tests/smoke_import.sh` permite validar rápidamente la configuración local. De forma predeterminada toma 50 filas aleatorias del CSV maestro, ejecuta el pipeline completo y verifica que Stage 07 haya generado `media.jsonl` con contenido y llaves obligatorias. Para forzar el modo antiguo por rango (`1000-1050`) se puede usar `--mode rows`.
 
 ```bash
 cd /home/compustar/compustar-project
-tests/smoke_import.sh
+tests/smoke_import.sh              # modo random50
+tests/smoke_import.sh --mode rows  # subset fijo 1000-1050
 ```
 
 ## 12. Contacto y mantenimiento
