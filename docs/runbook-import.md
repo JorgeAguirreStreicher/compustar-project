@@ -108,11 +108,11 @@ Artefactos adicionales generados por etapas intermedias: `final/unmapped.csv`, `
 
 - Master log: `$RUN_DIR/logs/master.log`
 - Logs por stage: `$RUN_DIR/logs/<stage>.log` (por ejemplo `01-fetch.log`, `07-media.log`)
-- Logs especiales: Stage 07 escribe `stage07.log`, Stage 10 y 11 generan sus propios logs definidos por CLI.
+- Logs especiales: Stage 07 escribe `stage-07.log`, Stage 10 y 11 generan sus propios logs definidos por CLI.
 
 Para ver las últimas líneas de un stage:
 ```bash
-tail -n 100 "$RUN_DIR/logs/07-media.log"
+tail -n 100 "$RUN_DIR/logs/stage-07.log"
 ```
 
 Para ver el resumen consolidado:
@@ -137,6 +137,34 @@ jq -c '. | select(.resolution == "mapped")' "$RUN_DIR/resolved.jsonl" | wc -l
 
 # Listar filas sin categoría mapeada
 jq -r 'select(.resolution != "mapped") | .sku' "$RUN_DIR/resolved.jsonl"
+```
+
+### Stage 07 (media)
+
+- **Entradas:**
+  - `resolved.jsonl` (principal)
+  - `validated.jsonl` (fallback con advertencia en logs)
+- **Salidas:**
+  - `media.jsonl` (manifest por registro)
+  - Log detallado en `$RUN_DIR/logs/stage-07.log`
+- **Variables de entorno relevantes:** `RUN_DIR`, `RUN_PATH` (como respaldo si no existe `RUN_DIR`).
+- **Validaciones clave:**
+  - Falla inmediato si no se puede resolver un RUN válido o no hay permisos de escritura.
+  - Verifica que exista al menos uno de los archivos de entrada mencionados.
+  - Evalúa URLs de imagen mediante `wp_remote_head()` con fallback a `wp_remote_get()` (timeout 8s, 3 redirecciones).
+  - Clasifica `image_status` (`ok`, `missing`, `invalid_url`, `http_error`, `timeout`).
+  - Siempre crea `media.jsonl`; si no hay registros válidos se genera un archivo vacío y el stage termina en éxito.
+
+Ejemplos útiles:
+
+```bash
+# Resumen rápido de estado de imágenes
+jq -r '[(.sku//"-"), (.image_status//"-"), (.image_url//"-")] | @tsv' \
+  "$RUN_DIR/media.jsonl" | column -t -s $'\t' | head
+
+# Detectar timeouts/errores HTTP
+jq -r 'select(.image_status != "ok" and .image_status != "missing") | .sku' \
+  "$RUN_DIR/media.jsonl"
 ```
 
 ## 8. Cron y automatización
