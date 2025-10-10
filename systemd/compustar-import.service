@@ -1,0 +1,14 @@
+[Unit]
+Description=Compustar LEGO import orchestrator
+After=network-online.target mariadb.service mysqld.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=compustar
+Group=compustar
+WorkingDirectory=/home/compustar/compustar-project
+EnvironmentFile=-/home/compustar/compustar-project/scripts/.env
+ExecStart=/home/compustar/compustar-project/scripts/run_compustar_import.sh --source /home/compustar/htdocs/ProductosHora.csv
+StandardOutput=append:/var/log/compustar/import-systemd.log
+StandardError=append:/var/log/compustar/import-systemd.log
