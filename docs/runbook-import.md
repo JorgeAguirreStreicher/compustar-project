@@ -141,19 +141,20 @@ jq -r 'select(.resolution != "mapped") | .sku' "$RUN_DIR/resolved.jsonl"
 
 ### Stage 07 (media)
 
+- **Ruta efectiva:** el orquestador invoca `wp eval-file` con `wp-content/plugins/compu-import-lego/includes/stages/07-media.php`. Las copias históricas bajo `server-mirror/compu-import-lego/compu-import-lego/...` son únicamente referencia y no participan en la ejecución.
 - **Entradas:**
-  - `resolved.jsonl` (principal)
-  - `validated.jsonl` (fallback con advertencia en logs)
+  - `resolved.jsonl` (principal).
+  - `validated.jsonl` (fallback; se registra `WARN` en el log si se usa).
 - **Salidas:**
-  - `media.jsonl` (manifest por registro)
-  - Log detallado en `$RUN_DIR/logs/stage-07.log`
-- **Variables de entorno relevantes:** `RUN_DIR`, `RUN_PATH` (como respaldo si no existe `RUN_DIR`).
+  - `media.jsonl` en el `RUN_DIR` actual.
+  - Log detallado en `$RUN_DIR/logs/stage-07.log` y mensajes de progreso por STDOUT.
+- **Variables de entorno:** `RUN_DIR` (preferido) y `RUN_PATH` (respaldo si el primero está vacío).
+- **Estructura de `media.jsonl`:** una línea JSON por SKU con las llaves `sku`, `image_url`, `gallery_urls` (array), `image_status` (`ok`, `missing`, `invalid_url`, `http_error`, `timeout`), `source` (`url`/`file`) y `notes` opcional. No hay encabezados ni arrays envolventes.
 - **Validaciones clave:**
-  - Falla inmediato si no se puede resolver un RUN válido o no hay permisos de escritura.
-  - Verifica que exista al menos uno de los archivos de entrada mencionados.
-  - Evalúa URLs de imagen mediante `wp_remote_head()` con fallback a `wp_remote_get()` (timeout 8s, 3 redirecciones).
-  - Clasifica `image_status` (`ok`, `missing`, `invalid_url`, `http_error`, `timeout`).
-  - Siempre crea `media.jsonl`; si no hay registros válidos se genera un archivo vacío y el stage termina en éxito.
+  - Verifica que el `RUN_DIR` exista y sea escribible; si no, aborta con código 1.
+  - Falla explícitamente si no encuentra archivo de entrada o no puede crear/escribir `media.jsonl`.
+  - Evalúa URLs con `wp_remote_head()` y fallback `wp_remote_get()` (timeout 8 s, máximo 3 redirecciones, cuerpo limitado a 32 KB) para clasificar el estado de cada imagen.
+  - Registra progreso cada 20 registros y resume totales al finalizar (`ok`, `missing`, `errors`).
 
 Ejemplos útiles:
 
@@ -163,9 +164,18 @@ jq -r '[(.sku//"-"), (.image_status//"-"), (.image_url//"-")] | @tsv' \
   "$RUN_DIR/media.jsonl" | column -t -s $'\t' | head
 
 # Detectar timeouts/errores HTTP
-jq -r 'select(.image_status != "ok" and .image_status != "missing") | .sku' \
+jq -r 'select(.image_status != "ok" and .image_status != "missing") | {sku, image_status, notes}' \
   "$RUN_DIR/media.jsonl"
+
+# Contar líneas generadas por Stage 07
+wc -l "$RUN_DIR/media.jsonl"
 ```
+
+- **Fallos habituales:**
+  - `RUN_DIR`/`RUN_PATH` no exportados → el stage aborta inmediatamente con `[07] RUN_DIR/RUN_PATH inválido`.
+  - Permisos insuficientes en `$RUN_DIR` → se registra `[07] RUN_DIR no es escribible` y termina en error.
+  - Faltan `resolved.jsonl` y `validated.jsonl` → salida `[07] No existe resolved.jsonl ni validated.jsonl`.
+  - Errores de red persistentes → revisar `stage-07.log` para identificar timeouts o códigos HTTP.
 
 ## 8. Cron y automatización
 
