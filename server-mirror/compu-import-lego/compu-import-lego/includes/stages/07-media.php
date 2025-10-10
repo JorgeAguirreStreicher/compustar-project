@@ -1,10 +1,9 @@
 <?php
+require_once dirname(__DIR__) . "/helpers/helpers-common.php";
 
-require_once dirname(__DIR__) . '/compu-media-helpers.php';
+require_once dirname(__DIR__) . '/helpers/helpers-media.php';
 
-if (!defined('COMP_RUN_STAGE')) {
-  return;
-}
+if (!defined('COMP_RUN_STAGE')) { define('COMP_RUN_STAGE', 1); }
 
 // Guard: solo ejecuta en WP-CLI (no en web)
 if (php_sapi_name() !== 'cli' && (!defined('WP_CLI') || !WP_CLI)) {
@@ -252,11 +251,17 @@ if (!$logHandle) {
   exit(1);
 }
 
-function compu_stage07_log(string $message): void
-{
-  global $logHandle;
-  $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . "\n";
-  fwrite($logHandle, $line);
+/* === init stage-07 log handle (global) === */
+$__run = rtrim(getenv('RUN_DIR') ?: getenv('RUN_PATH') ?: '', '/');
+$__logDir = $__run !== '' ? ($__run . '/logs') : '';
+if ($__logDir !== '' && !is_dir($__logDir)) { @mkdir($__logDir, 0775, true); }
+$__logPath = $__logDir !== '' ? ($__logDir . '/stage-07.log') : '';
+$logHandle = ($__logPath !== '' ? @fopen($__logPath, 'ab') : false);
+if (!$logHandle) { $logHandle = fopen('php://stdout', 'w'); }
+/* === end init === */
+function compu_stage07_log(string $message): void {
+    $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL;
+    @fwrite(STDERR, "[07] " . $line);
 }
 
 $resolvedPath = $run . '/resolved.jsonl';
@@ -270,14 +275,14 @@ if (is_readable($resolvedPath)) {
   compu_stage07_log('WARN: No se encontró resolved.jsonl, usando validated.jsonl');
 } else {
   fwrite(STDERR, "[07] No existe resolved.jsonl ni validated.jsonl en $run\n");
-  fclose($logHandle);
+  if (is_resource($logHandle)) { if (is_resource($logHandle)) { fclose($logHandle); } }
   exit(1);
 }
 
 $inputHandle = @fopen($inputPath, 'r');
 if (!$inputHandle) {
   fwrite(STDERR, "[07] No se pudo abrir el origen: $inputPath\n");
-  fclose($logHandle);
+  if (is_resource($logHandle)) { if (is_resource($logHandle)) { fclose($logHandle); } }
   exit(1);
 }
 
@@ -286,7 +291,7 @@ $outputHandle = @fopen($outputPath, 'w');
 if (!$outputHandle) {
   fwrite(STDERR, "[07] No se pudo crear el archivo de salida: $outputPath\n");
   fclose($inputHandle);
-  fclose($logHandle);
+  if (is_resource($logHandle)) { if (is_resource($logHandle)) { fclose($logHandle); } }
   exit(1);
 }
 
@@ -420,7 +425,7 @@ fclose($outputHandle);
 
 if (!file_exists($outputPath)) {
   fwrite(STDERR, "[07] No se generó media.jsonl en $run\n");
-  fclose($logHandle);
+  if (is_resource($logHandle)) { if (is_resource($logHandle)) { fclose($logHandle); } }
   exit(1);
 }
 
@@ -440,7 +445,7 @@ compu_stage07_log(
   )
 );
 
-fclose($logHandle);
+if (is_resource($logHandle)) { if (is_resource($logHandle)) { fclose($logHandle); } }
 
 $summary = sprintf(
   '[07] Wrote %s (lines=%d, ok=%d, missing=%d, errors=%d)',
