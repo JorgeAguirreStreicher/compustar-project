@@ -648,6 +648,10 @@ def detect_existing_sim(record: Mapping[str, Any]) -> Tuple[bool, Optional[int]]
     return False, None
 
 
+def detect_existing(record: Mapping[str, Any]) -> Tuple[bool, Optional[int]]:
+    return detect_existing_sim(record)
+
+
 def ensure_flags(entry: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
     flags = entry.setdefault("flags", {})
     for key in (
@@ -663,6 +667,76 @@ def ensure_flags(entry: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
     return flags
 
 
+def extract_excerpt(record: Mapping[str, Any]) -> str:
+    for key in (
+        "Resumen",
+        "resumen",
+        "excerpt",
+        "Excerpt",
+        "short_description",
+        "ShortDescription",
+    ):
+        value = record.get(key)
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return ""
+
+
+def extract_category_term(record: Mapping[str, Any]) -> Optional[int]:
+    candidates = (
+        "category_term",
+        "category_term_id",
+        "term_id",
+        "category_id",
+        "woo_category",
+        "category",
+        "ID_Menu_Nvl_3_term_id",
+        "category_term_mapped",
+    )
+    for key in candidates:
+        if key not in record:
+            continue
+        value = record.get(key)
+        if isinstance(value, (int, float)):
+            term_id = int(value)
+            if term_id > 0:
+                return term_id
+        if isinstance(value, str):
+            text = value.strip()
+            if text.isdigit():
+                term_id = int(text)
+                if term_id > 0:
+                    return term_id
+    return None
+
+
+def extract_sale_price(record: Mapping[str, Any]) -> Optional[float]:
+    for key in (
+        "sale_price",
+        "SalePrice",
+        "price_sale",
+        "precio_oferta",
+        "Precio_Oferta",
+    ):
+        if key in record:
+            value = parse_float(record.get(key), -1.0)
+            if value >= 0:
+                return float(round(value, 2))
+    return None
+
+
+def extract_audit_hash(record: Mapping[str, Any]) -> str:
+    for key in ("audit_hash", "hash", "row_hash", "_compu_import_hash"):
+        value = record.get(key)
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return ""
+
+
 def stage10(args: argparse.Namespace) -> None:
     run_dir = Path(args.run_dir)
     input_path = Path(args.input)
@@ -671,417 +745,244 @@ def stage10(args: argparse.Namespace) -> None:
     dry_run = bool(args.dry_run)
     summary_paths = collect_summary_paths(run_dir, args.summary)
 
+    os.environ.setdefault("ST10_SKIP_GALLERY", "1")
+    os.environ.setdefault("ST10_SKIP_ATTRS", "1")
+    os.environ.setdefault("ST10_BRAND_ONLY_ON_NEW", "1")
+    os.environ.setdefault("ST10_ASSIGN_CATS_ONLY", "1")
+    os.environ.setdefault("ST10_PRICE_RULE", "LOWER_ONLY_META")
+
     writer = (args.writer or os.environ.get("IMPORT_WRITER") or os.environ.get("WRITER") or "sim").strip().lower()
     if writer not in {"sim", "wp"}:
         writer = "sim"
     if writer == "wp" and dry_run and os.environ.get("FORCE_WRITE", "0") in {"1", "true", "yes"}:
         dry_run = False
 
-    wp_path = args.wp_path or os.environ.get("WP_PATH", "wp")
-    wp_args = args.wp_args or os.environ.get("WP_PATH_ARGS", "")
-    write_enabled = writer == "wp" and not dry_run
+    wp_bin = args.wp_path or os.environ.get("WP_PATH") or "/usr/local/bin/wp"
+    raw_wp_args = args.wp_args or os.environ.get("WP_PATH_ARGS") or ""
+    wp_args = shlex.split(raw_wp_args) if raw_wp_args else []
+    has_path_flag = False
+    for index, token in enumerate(wp_args):
+        if token.startswith("--path="):
+            has_path_flag = True
+            break
+        if token == "--path" and index + 1 < len(wp_args):
+            has_path_flag = True
+            break
+    if not has_path_flag:
+        wp_root = os.environ.get("WP_ROOT", "/home/compustar/htdocs")
+        wp_args.append(f"--path={wp_root}")
+
+    executor_path = (
+        os.environ.get("ST10_EXECUTOR_PATH")
+        or "/home/compustar/htdocs/wp-content/plugins/compu-import-lego/includes/stages/stage10_apply_fast.php"
+    )
 
     ensure_parent_dir(log_path)
     ensure_parent_dir(report_path)
+    run_dir_logs = run_dir / "logs"
+    run_dir_logs.mkdir(parents=True, exist_ok=True)
+    fast_log_path = run_dir_logs / "stage-10.log"
 
-    with log_path.open("w", encoding="utf-8") as log:
-        log.write(f"== Stage 10: import (writer={writer})==\n")
-        log.write(f"Dry-run={'yes' if dry_run else 'no'}\n")
+    if not input_path.exists():
+        raise FileNotFoundError(f"No existe input: {input_path}")
 
-        if not input_path.exists():
-            raise FileNotFoundError(f"No existe input: {input_path}")
+    records = list(read_jsonl(input_path))
 
-        records = list(read_jsonl(input_path))
-        total_records = len(records)
-        log.write(f"Registros a procesar: {total_records}\n")
+    metrics: Dict[str, Any] = {
+        "rows_total": len(records),
+        "processed": 0,
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "updated_price": 0,
+        "kept_price": 0,
+        "stock_set": 0,
+        "cat_assigned": 0,
+        "skipped_no_cat": 0,
+        "errors": 0,
+    }
 
-        woo_client = WooClient(wp_path, wp_args, log, write_enabled) if writer == "wp" else None
-        mirror_manager = MirrorManager(woo_client, log, args.run_id or run_dir.name) if woo_client else None
-
-        metrics: Dict[str, Any] = {
-            "rows_total": total_records,
-            "created": 0,
-            "updated": 0,
-            "skipped": 0,
-            "price_zero": 0,
-            "stock_zero": 0,
-            "wp_errors": 0,
-            "mirror_written": 0,
-            "mirror_partial": 0,
-            "mirror_skipped": 0,
+    results: List[Dict[str, Any]] = []
+    stage_env = os.environ.copy()
+    stage_env.update(
+        {
+            "ST10_SKIP_GALLERY": os.environ.get("ST10_SKIP_GALLERY", "1"),
+            "ST10_SKIP_ATTRS": os.environ.get("ST10_SKIP_ATTRS", "1"),
+            "ST10_BRAND_ONLY_ON_NEW": os.environ.get("ST10_BRAND_ONLY_ON_NEW", "1"),
+            "ST10_ASSIGN_CATS_ONLY": os.environ.get("ST10_ASSIGN_CATS_ONLY", "1"),
+            "ST10_PRICE_RULE": os.environ.get("ST10_PRICE_RULE", "LOWER_ONLY_META"),
+            "RUN_DIR": str(run_dir),
         }
+    )
 
-        created_entries: List[Dict[str, Any]] = []
-        updated_entries: List[Dict[str, Any]] = []
-        skipped_entries: List[Dict[str, Any]] = []
+    log_handles: Dict[Path, Any] = {}
+    try:
+        for path_obj in {log_path.resolve(), fast_log_path.resolve()}:
+            ensure_parent_dir(path_obj)
+            log_handles[path_obj] = path_obj.open("w", encoding="utf-8")
+
+        def write_log_line(payload: Mapping[str, Any]) -> None:
+            line = json.dumps(payload, ensure_ascii=False) + "\n"
+            for handle in log_handles.values():
+                handle.write(line)
+
+        if not records:
+            write_log_line({"sku": None, "actions": [], "skipped": ["no_records"], "errors": []})
+            update_summary(summary_paths, "stage_10", metrics)
+            report_payload = {"results": results, "metrics": metrics}
+            with report_path.open("w", encoding="utf-8") as fh:
+                json.dump(report_payload, fh, indent=2, ensure_ascii=False, sort_keys=True)
+            return
+
+        def run_executor(payload: Mapping[str, Any]) -> Dict[str, Any]:
+            payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            cmd_prefix: List[str] = [wp_bin]
+            if "--skip-themes" not in wp_args:
+                cmd_prefix.append("--skip-themes")
+            cmd: List[str] = [*cmd_prefix, *wp_args, "eval-file", executor_path, "--", payload_json]
+            attempts = 0
+            last_error: Optional[Exception] = None
+            while attempts <= 1:
+                attempts += 1
+                try:
+                    completed = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        env=stage_env,
+                        timeout=15,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    last_error = WPCLIError(f"timeout:{exc}")
+                else:
+                    if completed.returncode == 0:
+                        stdout = completed.stdout.strip()
+                        parsed = None
+                        if stdout:
+                            for line in reversed([line.strip() for line in completed.stdout.splitlines() if line.strip()]):
+                                try:
+                                    parsed = json.loads(line)
+                                    break
+                                except json.JSONDecodeError:
+                                    continue
+                        if isinstance(parsed, dict):
+                            return parsed
+                        last_error = WPCLIError("invalid_json_output")
+                    else:
+                        message = completed.stderr.strip() or completed.stdout.strip() or f"rc={completed.returncode}"
+                        last_error = WPCLIError(message)
+                if attempts > 1:
+                    break
+                time.sleep(0.1)
+            raise last_error or WPCLIError("unknown_error")
 
         for record in records:
             sku = str(record.get("sku") or record.get("SKU") or "").strip()
             if not sku:
-                log.write("registro sin SKU, skip\n")
                 metrics["skipped"] += 1
-                skipped_entries.append({"sku": None, "action": "skipped", "reason": "missing_sku", "flags": {}})
+                metrics["errors"] += 1
+                result = {"sku": None, "id": None, "actions": [], "skipped": ["missing_sku"], "errors": ["missing_sku"]}
+                results.append(result)
+                write_log_line(result)
                 continue
-
-            name = build_name(record)
-            brand = str(record.get("Marca", "")).strip()
-            category_raw = record.get("ID_Menu_Nvl_3")
-            description = extract_description(record)
-            image_source = extract_image_source(record)
-            weight = parse_float(record.get("Peso_Kg"), -1.0)
-            weight = round(weight, 3) if weight >= 0 else None
 
             stock_info = compute_stock_info(record)
-            stock_total = stock_info["stock_total_mayoristas"]
-            precio_objetivo = parse_float(record.get("price_16_final"), 0.0)
+            stock_total = int(stock_info.get("stock_total_mayoristas", 0))
+            stock_status = "instock" if stock_total > 0 else "outofstock"
+            price = round(parse_float(record.get("price_16_final"), 0.0), 2)
+            sale_price = extract_sale_price(record)
+            brand = str(record.get("Marca", "")).strip()
+            description = extract_description(record)
+            excerpt = extract_excerpt(record)
+            image_url = extract_image_source(record)
+            audit_hash = extract_audit_hash(record)
+            title = build_name(record)
+            slug = record.get("slug") if isinstance(record.get("slug"), str) else ""
+            slug = slug.strip() if slug else slugify(title or sku)
 
-            entry: Dict[str, Any] = {
+            existing, product_id_hint = detect_existing(record)
+            payload_exists = bool(existing or (product_id_hint and int(product_id_hint) > 0))
+            payload: Dict[str, Any] = {
                 "sku": sku,
-                "precio_objetivo": round(precio_objetivo, 2),
-                "stock_total_mayoristas": stock_total,
-                "before": {},
-                "after": {
-                    "name": name,
-                    "brand": brand,
-                    "category": category_raw,
-                    "stock": stock_total,
-                    "price": round(precio_objetivo, 2),
-                    "weight": weight,
-                },
-                "flags": {},
-            }
-            flags = ensure_flags(entry)
-
-            existing = False
-            product_id: Optional[int] = None
-            current_price = 0.0
-            current_stock = 0
-            current_brand = ""
-            current_category = ""
-            has_image = False
-            has_desc = False
-
-            if writer == "wp" and woo_client:
-                try:
-                    product_id = woo_client.find_product_id(sku)
-                except WPCLIError as exc:
-                    metrics["skipped"] += 1
-                    metrics["wp_errors"] += 1
-                    entry["action"] = "skipped"
-                    entry["reason"] = f"wp_error:{exc}"
-                    skipped_entries.append(entry)
-                    log.write(f"{sku}: error find_product_id → {exc}\n")
-                    continue
-                existing = product_id is not None
-                if existing and product_id:
-                    entry["after"]["product_id"] = product_id
-                    entry["before"]["product_id"] = product_id
-                    current_price = parse_float(woo_client.get_post_meta(product_id, "_regular_price"), 0.0)
-                    current_stock = parse_int(woo_client.get_post_meta(product_id, "_stock"), 0)
-                    entry["before"]["price"] = round(current_price, 2)
-                    entry["before"]["stock"] = current_stock
-                    terms_brand = woo_client.get_terms(product_id, "product_brand")
-                    if terms_brand:
-                        current_brand = str(terms_brand[0].get("name") or "")
-                        if current_brand:
-                            entry["before"]["brand"] = current_brand
-                    terms_cat = woo_client.get_terms(product_id, "product_cat")
-                    if terms_cat:
-                        term = terms_cat[0]
-                        term_id = term.get("term_id")
-                        entry["before"]["category"] = term_id or term.get("name")
-                        current_category = str(term_id or term.get("name") or "")
-                    has_image = woo_client.has_thumbnail(product_id)
-                    has_desc = woo_client.has_description(product_id)
-                else:
-                    has_image = False
-                    has_desc = False
-            else:
-                existing, product_id = detect_existing_sim(record)
-                current_price = parse_float(record.get("woo_regular_price"), 0.0)
-                current_stock = parse_int(record.get("woo_stock"), 0)
-                if existing:
-                    entry["before"] = {
-                        "product_id": product_id,
-                        "price": round(current_price, 2),
-                        "stock": current_stock,
-                        "brand": record.get("woo_brand"),
-                        "category": record.get("woo_category"),
-                    }
-                has_image = bool(record.get("woo_has_image"))
-                has_desc = bool(record.get("woo_has_description"))
-
-            should_update_description = bool(description) and not has_desc
-            should_set_image = bool(image_source) and not has_image
-
-            if precio_objetivo <= 0:
-                metrics["price_zero"] += 1
-                entry["reason"] = "price_zero"
-                if existing and writer == "wp" and woo_client and product_id:
-                    try:
-                        woo_client.update_post_meta(product_id, "_manage_stock", "yes")
-                        woo_client.update_post_meta(product_id, "_stock", "0")
-                        woo_client.update_post_meta(product_id, "_stock_status", "outofstock")
-                        flags["stock_set"] = True
-                    except WPCLIError as exc:
-                        metrics["wp_errors"] += 1
-                        entry["reason"] = f"wp_error:{exc}"
-                        entry["action"] = "skipped"
-                        skipped_entries.append(entry)
-                        log.write(f"{sku}: error al forzar stock=0 → {exc}\n")
-                        continue
-                    entry["action"] = "update"
-                    updated_entries.append(entry)
-                    metrics["updated"] += 1
-                    log.write(f"{sku}: precio objetivo 0 → stock forzado a 0.\n")
-                elif existing:
-                    entry["action"] = "update"
-                    flags["stock_set"] = True
-                    updated_entries.append(entry)
-                    metrics["updated"] += 1
-                    log.write(f"{sku}: precio 0 (simulación) → stock=0.\n")
-                else:
-                    entry["action"] = "skipped"
-                    skipped_entries.append(entry)
-                    metrics["skipped"] += 1
-                    log.write(f"{sku}: precio 0, no se crea.\n")
-                continue
-
-            if stock_total <= 0:
-                metrics["stock_zero"] += 1
-                entry["reason"] = "stock_zero"
-                if existing and writer == "wp" and woo_client and product_id:
-                    try:
-                        woo_client.update_post_meta(product_id, "_manage_stock", "yes")
-                        woo_client.update_post_meta(product_id, "_stock", "0")
-                        woo_client.update_post_meta(product_id, "_stock_status", "outofstock")
-                        flags["stock_set"] = True
-                    except WPCLIError as exc:
-                        metrics["wp_errors"] += 1
-                        entry["reason"] = f"wp_error:{exc}"
-                        entry["action"] = "skipped"
-                        skipped_entries.append(entry)
-                        log.write(f"{sku}: error al poner stock=0 → {exc}\n")
-                        continue
-                    entry["action"] = "update"
-                    updated_entries.append(entry)
-                    metrics["updated"] += 1
-                    log.write(f"{sku}: sin stock → stock=0 actualizado.\n")
-                elif existing:
-                    entry["action"] = "update"
-                    flags["stock_set"] = True
-                    updated_entries.append(entry)
-                    metrics["updated"] += 1
-                    log.write(f"{sku}: sin stock (sim) → stock=0.\n")
-                else:
-                    entry["action"] = "skipped"
-                    skipped_entries.append(entry)
-                    metrics["skipped"] += 1
-                    log.write(f"{sku}: sin stock, no se crea.\n")
-                continue
-
-            price_set = False
-            stock_set = False
-            desc_set = False
-            image_set = False
-            category_assigned = False
-            brand_assigned = False
-            mirror_status = "skipped"
-
-            category_term_id: Optional[int] = None
-            category_slug = ""
-
-            if existing:
-                if product_id:
-                    entry["after"]["product_id"] = product_id
-                entry["action"] = "update"
-                if writer == "wp" and woo_client and product_id:
-                    try:
-                        woo_client.update_post_meta(product_id, "_sku", sku)
-                        woo_client.update_post_meta(product_id, "_manage_stock", "yes")
-                        woo_client.update_post_meta(product_id, "_stock", str(stock_total))
-                        woo_client.update_post_meta(
-                            product_id,
-                            "_stock_status",
-                            "instock" if stock_total > 0 else "outofstock",
-                        )
-                        stock_set = True
-                        if weight is not None:
-                            woo_client.update_post_meta(product_id, "_weight", str(weight))
-                        if should_update_description:
-                            woo_client.post_update(product_id, post_content=description)
-                            desc_set = True
-                        if name and woo_client.get_post_field(product_id, "post_title") != name:
-                            woo_client.post_update(product_id, post_title=name)
-                        if should_set_image:
-                            woo_client.import_image(product_id, image_source)
-                            image_set = True
-                        # Price guard: only lower or equal
-                        if current_price <= 0 or precio_objetivo <= current_price:
-                            price_text = format_price(precio_objetivo)
-                            woo_client.update_post_meta(product_id, "_price", price_text)
-                            woo_client.update_post_meta(product_id, "_regular_price", price_text)
-                            price_set = True
-                        else:
-                            log.write(
-                                f"{sku}: precio nuevo ({precio_objetivo}) > actual ({current_price}), no se actualiza precio.\n"
-                            )
-                        if brand:
-                            term_id = woo_client.ensure_brand(brand)
-                            if term_id:
-                                woo_client.set_terms("product_brand", product_id, term_id)
-                                brand_assigned = True
-                        if category_raw is not None:
-                            category_term_id = woo_client.ensure_category(category_raw)
-                            if category_term_id:
-                                woo_client.set_terms("product_cat", product_id, category_term_id)
-                                category_assigned = True
-                                category_slug = slugify(str(category_raw if not isinstance(category_raw, list) else category_raw[-1]))
-                    except WPCLIError as exc:
-                        metrics["wp_errors"] += 1
-                        entry["reason"] = f"wp_error:{exc}"
-                        entry["action"] = "skipped"
-                        skipped_entries.append(entry)
-                        log.write(f"{sku}: error update → {exc}\n")
-                        continue
-                else:
-                    stock_set = True
-                    desc_set = should_update_description
-                    image_set = should_set_image
-                    if precio_objetivo <= current_price or current_price <= 0:
-                        price_set = True
-                    else:
-                        log.write(
-                            f"{sku}: (sim) precio nuevo {precio_objetivo} > actual {current_price}, no se actualiza.\n"
-                        )
-                    category_assigned = category_raw is not None
-                    brand_assigned = bool(brand)
-                metrics["updated"] += 1
-                updated_entries.append(entry)
-            else:
-                entry["action"] = "create"
-                if writer == "wp" and woo_client:
-                    try:
-                        create_fields = {"post_title": name or sku}
-                        if should_update_description:
-                            create_fields["post_content"] = description
-                        product_id = woo_client.post_create(**create_fields)
-                        entry["after"]["product_id"] = product_id
-                        woo_client.update_post_meta(product_id, "_sku", sku)
-                        woo_client.update_post_meta(product_id, "_manage_stock", "yes")
-                        woo_client.update_post_meta(product_id, "_stock", str(stock_total))
-                        woo_client.update_post_meta(
-                            product_id,
-                            "_stock_status",
-                            "instock" if stock_total > 0 else "outofstock",
-                        )
-                        stock_set = True
-                        if precio_objetivo > 0:
-                            price_text = format_price(precio_objetivo)
-                            woo_client.update_post_meta(product_id, "_price", price_text)
-                            woo_client.update_post_meta(product_id, "_regular_price", price_text)
-                            price_set = True
-                        if weight is not None:
-                            woo_client.update_post_meta(product_id, "_weight", str(weight))
-                        if brand:
-                            term_id = woo_client.ensure_brand(brand)
-                            if term_id:
-                                woo_client.set_terms("product_brand", product_id, term_id)
-                                brand_assigned = True
-                        if category_raw is not None:
-                            category_term_id = woo_client.ensure_category(category_raw)
-                            if category_term_id:
-                                woo_client.set_terms("product_cat", product_id, category_term_id)
-                                category_assigned = True
-                                category_slug = slugify(
-                                    str(category_raw if not isinstance(category_raw, list) else category_raw[-1])
-                                )
-                        if should_set_image:
-                            woo_client.import_image(product_id, image_source)
-                            image_set = True
-                        if not should_update_description and description and not desc_set:
-                            # ensure description if provided but product had none
-                            woo_client.post_update(product_id, post_content=description)
-                            desc_set = True
-                        else:
-                            desc_set = should_update_description
-                    except WPCLIError as exc:
-                        metrics["wp_errors"] += 1
-                        entry["reason"] = f"wp_error:{exc}"
-                        entry["action"] = "skipped"
-                        skipped_entries.append(entry)
-                        log.write(f"{sku}: error create → {exc}\n")
-                        continue
-                else:
-                    stock_set = True
-                    price_set = True
-                    desc_set = should_update_description
-                    image_set = should_set_image
-                    category_assigned = category_raw is not None
-                    brand_assigned = bool(brand)
-                metrics["created"] += 1
-                created_entries.append(entry)
-
-            flags["price_set"] = price_set
-            flags["stock_set"] = stock_set
-            flags["desc_set"] = desc_set
-            flags["image_set"] = image_set
-            flags["category_assigned"] = category_assigned
-            flags["brand_assigned"] = brand_assigned
-
-            if category_term_id:
-                entry["after"]["category"] = category_term_id
-
-            product_payload = {
-                "name": name,
-                "brand": brand,
-                "category_id": category_term_id,
-                "category_slug": category_slug,
-                "weight": weight,
+                "exists": payload_exists,
+                "id": int(product_id_hint) if product_id_hint else None,
+                "price": price,
                 "stock": stock_total,
-                "image_set": image_set,
+                "stock_status": stock_status,
+                "brand": brand,
+                "category_term": extract_category_term(record),
+                "title": title,
+                "content": description,
+                "excerpt": excerpt,
+                "image_url": image_url if not payload_exists else "",
+                "audit_hash": audit_hash,
+                "slug": slug,
             }
+            if sale_price is not None:
+                payload["sale_price"] = sale_price
 
-            if writer == "wp" and woo_client and mirror_manager and entry["action"] != "skipped":
-                try:
-                    status = mirror_manager.apply(sku, record, product_payload)
-                except WPCLIError as exc:
-                    status = "partial"
-                    metrics["wp_errors"] += 1
-                    log.write(f"{sku}: mirror error → {exc}\n")
-                if status == "written":
-                    metrics["mirror_written"] += 1
-                    flags["mirror_written"] = True
-                elif status == "partial":
-                    metrics["mirror_partial"] += 1
-                else:
-                    metrics["mirror_skipped"] += 1
+            metrics["processed"] += 1
+
+            if writer != "wp" or dry_run:
+                result = {
+                    "sku": sku,
+                    "id": payload.get("id"),
+                    "actions": [],
+                    "skipped": ["dry_run"],
+                    "errors": [],
+                }
             else:
-                flags["mirror_written"] = False
+                try:
+                    result = run_executor(payload)
+                except Exception as exc:
+                    metrics["errors"] += 1
+                    result = {
+                        "sku": sku,
+                        "id": payload.get("id"),
+                        "actions": [],
+                        "skipped": [],
+                        "errors": [f"wp_cli_failed:{exc}"],
+                    }
+                else:
+                    actions = result.get("actions", []) or []
+                    skipped = result.get("skipped", []) or []
+                    errors = result.get("errors", []) or []
+                    if "price_updated" in actions:
+                        metrics["updated_price"] += 1
+                    if "price_not_lower" in skipped:
+                        metrics["kept_price"] += 1
+                    if "stock_set" in actions:
+                        metrics["stock_set"] += 1
+                    if "cat_assigned" in actions:
+                        metrics["cat_assigned"] += 1
+                    if "missing_category" in skipped:
+                        metrics["skipped_no_cat"] += 1
+                        metrics["skipped"] += 1
+                    if "product_missing" in skipped:
+                        metrics["skipped"] += 1
+                    if "created" in actions:
+                        metrics["created"] += 1
+                    if "updated" in actions:
+                        metrics["updated"] += 1
+                    if errors:
+                        metrics["errors"] += 1
 
-            log_parts = [
-                f"action={entry['action']}",
-                f"price_set={price_set}",
-                f"stock_set={stock_set}",
-                f"desc={desc_set}",
-                f"image={image_set}",
-                f"brand={brand_assigned}",
-                f"cat={category_assigned}",
-            ]
-            if flags.get("mirror_written"):
-                log_parts.append("mirror=written")
-            log.write(f"{sku}: " + " ".join(log_parts) + "\n")
+            results.append(result)
+            write_log_line(result)
 
-        report_payload = {
-            "created": created_entries,
-            "updated": updated_entries,
-            "skipped": skipped_entries,
-        }
+    finally:
+        for handle in log_handles.values():
+            try:
+                handle.close()
+            except Exception:
+                pass
 
+    report_payload = {"results": results, "metrics": metrics}
     with report_path.open("w", encoding="utf-8") as fh:
         json.dump(report_payload, fh, indent=2, ensure_ascii=False, sort_keys=True)
 
     update_summary(summary_paths, "stage_10", metrics)
+
 
 
 if __name__ == "__main__":
