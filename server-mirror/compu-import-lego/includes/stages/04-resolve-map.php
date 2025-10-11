@@ -89,6 +89,14 @@ class Compu_Stage_Resolve_Map {
     }
     // [/COMPUSTAR][ADD]
 
+    // [COMPUSTAR][ADD] Estado para métricas de márgenes vía mapa de categorías
+    $compuStage04MarginDbState = [
+      'enabled' => isset($compuMarginContext['enabled']) ? (bool) $compuMarginContext['enabled'] : $this->compu_stage04_flag_enabled('ST4_ENRICH_MARGIN'),
+      'found' => 0,
+      'default' => 0,
+    ];
+    // [/COMPUSTAR][ADD]
+
     while (($line = fgets($inputHandle)) !== false) {
       $line = trim($line);
       if ($line === '') {
@@ -147,6 +155,54 @@ class Compu_Stage_Resolve_Map {
       }
       // [/COMPUSTAR][ADD]
 
+      // [COMPUSTAR][ADD] Resolver margen desde mapa de categorías con prioridades term/vendor
+      if ($compuStage04MarginDbState['enabled']) {
+        $termId = null;
+        if (isset($decoded['woo_term_id'])) {
+          $termCandidate = (int) $decoded['woo_term_id'];
+          if ($termCandidate > 0) {
+            $termId = $termCandidate;
+          }
+        }
+
+        $vendorL3Id = null;
+        if (isset($decoded['ID_Menu_Nvl_3'])) {
+          $vendorCandidate = (int) $decoded['ID_Menu_Nvl_3'];
+          if ($vendorCandidate > 0) {
+            $vendorL3Id = $vendorCandidate;
+          }
+        }
+
+        $marginUsedDefault = false;
+        $marginFromMap = $this->compu_stage04_get_margin_pct($termId, $vendorL3Id, $marginUsedDefault);
+        $decoded['margin_pct'] = $this->compu_stage04_format_margin_pct($marginFromMap);
+
+        if ($marginUsedDefault) {
+          $decoded['margin_default'] = true;
+          $compuStage04MarginDbState['default']++;
+        } else {
+          if (isset($decoded['margin_default'])) {
+            unset($decoded['margin_default']);
+          }
+          $compuStage04MarginDbState['found']++;
+        }
+
+        $skuForMargin = $this->stringValue($decoded['SKU'] ?? ($decoded['sku'] ?? ''));
+        if ($skuForMargin !== '' && isset($compuMarginContext) && is_array($compuMarginContext) && !empty($compuMarginContext['enabled'])) {
+          $upperSku = strtoupper($skuForMargin);
+          if (!isset($compuMarginContext['updates'][$upperSku]) || !is_array($compuMarginContext['updates'][$upperSku])) {
+            $compuMarginContext['updates'][$upperSku] = [];
+          }
+          $compuMarginContext['updates'][$upperSku]['margin_pct'] = $decoded['margin_pct'];
+          if ($marginUsedDefault) {
+            $compuMarginContext['updates'][$upperSku]['margin_default'] = true;
+          } elseif (isset($compuMarginContext['updates'][$upperSku]['margin_default'])) {
+            unset($compuMarginContext['updates'][$upperSku]['margin_default']);
+          }
+        }
+      }
+      // [/COMPUSTAR][ADD]
+
       if (!isset($statusCounts[$status])) {
         $statusCounts[$status] = 0;
       }
@@ -182,12 +238,26 @@ class Compu_Stage_Resolve_Map {
       'resolved_path' => $resolved,
     ];
 
+    // [COMPUSTAR][ADD] Métricas de margen en el resumen del Stage 04
+    if (isset($compuStage04MarginDbState) && !empty($compuStage04MarginDbState['enabled'])) {
+      $summary['margin_found'] = (int) $compuStage04MarginDbState['found'];
+      $summary['margin_default'] = (int) $compuStage04MarginDbState['default'];
+    }
+    // [/COMPUSTAR][ADD]
+
     $this->log($logHandle, 'info', 'Resumen Stage 04', $summary);
     fclose($logHandle);
 
     $metrics = array_merge($summary, [
       'generated_at' => gmdate('c'),
     ]);
+
+    // [COMPUSTAR][ADD] Propagar métricas de margen a stage-04.metrics.json
+    if (isset($compuStage04MarginDbState) && !empty($compuStage04MarginDbState['enabled'])) {
+      $metrics['margin_found'] = (int) $compuStage04MarginDbState['found'];
+      $metrics['margin_default'] = (int) $compuStage04MarginDbState['default'];
+    }
+    // [/COMPUSTAR][ADD]
 
     file_put_contents($metricsOut, json_encode($metrics, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
@@ -639,6 +709,158 @@ class Compu_Stage_Resolve_Map {
     }
 
     file_put_contents($path, implode("\n", $updatedLines) . "\n");
+  }
+  // [/COMPUSTAR][ADD]
+
+  // [COMPUSTAR][ADD] Resolución de márgenes desde wp_compu_cats_map / compu_cats_map
+  private function compu_stage04_get_margin_pct(?int $termId, ?int $vendorL3Id, ?bool &$usedDefault = null): float {
+    static $cacheByTerm   = [];
+    static $cacheByVendor = [];
+
+    $DEFAULT_MARGIN = 0.1500;
+    $usedDefault    = false;
+
+    $termKey   = ($termId !== null && $termId > 0) ? (int) $termId : null;
+    $vendorKey = ($vendorL3Id !== null && $vendorL3Id > 0) ? (int) $vendorL3Id : null;
+
+    if ($termKey !== null && isset($cacheByTerm[$termKey])) {
+      $cached = $cacheByTerm[$termKey];
+      $usedDefault = (bool) ($cached['default'] ?? false);
+      return (float) ($cached['value'] ?? $DEFAULT_MARGIN);
+    }
+
+    if ($vendorKey !== null && isset($cacheByVendor[$vendorKey])) {
+      $cached = $cacheByVendor[$vendorKey];
+      $usedDefault = (bool) ($cached['default'] ?? false);
+      return (float) ($cached['value'] ?? $DEFAULT_MARGIN);
+    }
+
+    $marginValue = null;
+
+    $tablesToCheck = $this->compu_stage04_margin_table_sequence();
+    $visitedTables = [];
+
+    foreach ($tablesToCheck as $tableName) {
+      $tableName = trim((string) $tableName);
+      if ($tableName === '' || isset($visitedTables[$tableName])) {
+        continue;
+      }
+      $visitedTables[$tableName] = true;
+
+      if ($termKey !== null) {
+        $marginValue = $this->compu_stage04_fetch_margin_value($tableName, 'term_id', $termKey);
+      }
+
+      if ($marginValue !== null) {
+        break;
+      }
+
+      if ($vendorKey !== null) {
+        $marginValue = $this->compu_stage04_fetch_margin_value($tableName, 'vendor_l3_id', $vendorKey);
+      }
+
+      if ($marginValue !== null) {
+        break;
+      }
+    }
+
+    if ($marginValue === null) {
+      $usedDefault = true;
+      $marginValue = $DEFAULT_MARGIN;
+    }
+
+    $normalizedMargin = $this->compu_stage04_normalize_margin($marginValue);
+
+    $cachePayload = [
+      'value'   => $normalizedMargin,
+      'default' => $usedDefault,
+    ];
+
+    if ($termKey !== null) {
+      $cacheByTerm[$termKey] = $cachePayload;
+    }
+
+    if ($vendorKey !== null) {
+      $cacheByVendor[$vendorKey] = $cachePayload;
+    }
+
+    return (float) $normalizedMargin;
+  }
+
+  /**
+   * @return array<int,string>
+   */
+  private function compu_stage04_margin_table_sequence(): array {
+    $tables = ['wp_compu_cats_map'];
+
+    global $wpdb;
+    if (isset($wpdb) && is_object($wpdb) && property_exists($wpdb, 'prefix')) {
+      $prefix = (string) $wpdb->prefix;
+      if ($prefix !== '') {
+        $prefixedTable = $prefix . 'compu_cats_map';
+        if (!in_array($prefixedTable, $tables, true)) {
+          $tables[] = $prefixedTable;
+        }
+      }
+    }
+
+    if (!in_array('compu_cats_map', $tables, true)) {
+      $tables[] = 'compu_cats_map';
+    }
+
+    return $tables;
+  }
+
+  private function compu_stage04_fetch_margin_value(string $table, string $column, int $value): ?float {
+    global $wpdb;
+
+    if (!isset($wpdb) || !is_object($wpdb)) {
+      return null;
+    }
+
+    $table = trim($table);
+    $column = trim($column);
+
+    if ($table === '' || $column === '') {
+      return null;
+    }
+
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $table) || !preg_match('/^[A-Za-z0-9_]+$/', $column)) {
+      return null;
+    }
+
+    $sql = sprintf('SELECT margin_pct FROM `%s` WHERE `%s` = %%d LIMIT 1', $table, $column);
+    $prepared = $wpdb->prepare($sql, $value);
+    if ($prepared === false) {
+      return null;
+    }
+
+    try {
+      $result = $wpdb->get_var($prepared);
+    } catch (\Throwable $th) {
+      return null;
+    }
+
+    if ($result === null) {
+      return null;
+    }
+
+    $numeric = $this->compu_stage04_to_float($result);
+    if ($numeric === null) {
+      return null;
+    }
+
+    if ($numeric < 0) {
+      $numeric = 0.0;
+    } elseif ($numeric > 1) {
+      $numeric = 1.0;
+    }
+
+    return (float) $numeric;
+  }
+
+  private function compu_stage04_format_margin_pct(float $value): string {
+    return number_format(max(0.0, min(1.0, $value)), 4, '.', '');
   }
   // [/COMPUSTAR][ADD]
 
