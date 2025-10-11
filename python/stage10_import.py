@@ -18,6 +18,9 @@ from pipeline_utils import (
 )
 
 
+_WP_EVAL_FAST_ENV: Optional[Mapping[str, str]] = None
+
+
 class WPCLIError(RuntimeError):
     """Raised when a WP-CLI command fails."""
 
@@ -128,6 +131,56 @@ def compute_stock_info(record: Mapping[str, Any]) -> Dict[str, Any]:
         "stock_syscom": max(0, syscom),
         "stock_mayoristas": mayoristas,
     }
+
+
+def _wp_eval_fast(
+    wp_path: Sequence[str],
+    fast_php: str,
+    payload: Mapping[str, Any],
+) -> Dict[str, Any]:
+    dry_run_flag = str(os.environ.get("DRY_RUN", "")).strip().lower()
+    if dry_run_flag in {"1", "true", "yes"}:
+        return {"actions": [], "errors": [], "skipped": ["dry_run"]}
+
+    cmd_parts = [str(part) for part in wp_path if str(part).strip()]
+    if not cmd_parts:
+        return {"actions": [], "errors": ["wp_cli_failed:missing_wp_path"], "skipped": []}
+
+    payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    cmd = [*cmd_parts, "eval-file", fast_php, "--", payload_json]
+
+    try:
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=_WP_EVAL_FAST_ENV,
+            timeout=20,
+        )
+    except FileNotFoundError as exc:
+        return {"actions": [], "errors": [f"wp_cli_failed:{exc}"], "skipped": []}
+
+    if completed.returncode != 0:
+        message = completed.stderr.strip() or completed.stdout.strip() or f"rc={completed.returncode}"
+        return {"actions": [], "errors": [f"wp_cli_failed:{message}"], "skipped": []}
+
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if not lines:
+        return {"actions": [], "errors": ["wp_cli_failed:empty_output"], "skipped": []}
+
+    last_line = lines[-1]
+    try:
+        parsed = json.loads(last_line)
+    except json.JSONDecodeError:
+        return {"actions": [], "errors": ["wp_cli_failed:invalid_json"], "skipped": []}
+
+    if not isinstance(parsed, dict):
+        return {"actions": [], "errors": ["wp_cli_failed:invalid_payload"], "skipped": []}
+
+    parsed.setdefault("actions", [])
+    parsed.setdefault("errors", [])
+    parsed.setdefault("skipped", [])
+    return parsed
 
 
 class WooClient:
@@ -815,7 +868,17 @@ def stage10(args: argparse.Namespace) -> None:
         }
     )
 
+    wp_command: List[str] = [wp_bin]
+    if "--skip-themes" not in wp_args:
+        wp_command.append("--skip-themes")
+    wp_command.extend(wp_args)
+
+    env_dry_run = str(os.environ.get("DRY_RUN", "")).strip().lower() in {"1", "true", "yes"}
+
     log_handles: Dict[Path, Any] = {}
+    global _WP_EVAL_FAST_ENV
+    previous_fast_env = _WP_EVAL_FAST_ENV
+    _WP_EVAL_FAST_ENV = stage_env
     try:
         for path_obj in {log_path.resolve(), fast_log_path.resolve()}:
             ensure_parent_dir(path_obj)
@@ -833,48 +896,6 @@ def stage10(args: argparse.Namespace) -> None:
             with report_path.open("w", encoding="utf-8") as fh:
                 json.dump(report_payload, fh, indent=2, ensure_ascii=False, sort_keys=True)
             return
-
-        def run_executor(payload: Mapping[str, Any]) -> Dict[str, Any]:
-            payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-            cmd_prefix: List[str] = [wp_bin]
-            if "--skip-themes" not in wp_args:
-                cmd_prefix.append("--skip-themes")
-            cmd: List[str] = [*cmd_prefix, *wp_args, "eval-file", executor_path, "--", payload_json]
-            attempts = 0
-            last_error: Optional[Exception] = None
-            while attempts <= 1:
-                attempts += 1
-                try:
-                    completed = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        env=stage_env,
-                        timeout=15,
-                    )
-                except subprocess.TimeoutExpired as exc:
-                    last_error = WPCLIError(f"timeout:{exc}")
-                else:
-                    if completed.returncode == 0:
-                        stdout = completed.stdout.strip()
-                        parsed = None
-                        if stdout:
-                            for line in reversed([line.strip() for line in completed.stdout.splitlines() if line.strip()]):
-                                try:
-                                    parsed = json.loads(line)
-                                    break
-                                except json.JSONDecodeError:
-                                    continue
-                        if isinstance(parsed, dict):
-                            return parsed
-                        last_error = WPCLIError("invalid_json_output")
-                    else:
-                        message = completed.stderr.strip() or completed.stdout.strip() or f"rc={completed.returncode}"
-                        last_error = WPCLIError(message)
-                if attempts > 1:
-                    break
-                time.sleep(0.1)
-            raise last_error or WPCLIError("unknown_error")
 
         for record in records:
             sku = str(record.get("sku") or record.get("SKU") or "").strip()
@@ -923,7 +944,7 @@ def stage10(args: argparse.Namespace) -> None:
 
             metrics["processed"] += 1
 
-            if writer != "wp" or dry_run:
+            if writer != "wp" or dry_run or env_dry_run:
                 result = {
                     "sku": sku,
                     "id": payload.get("id"),
@@ -933,7 +954,7 @@ def stage10(args: argparse.Namespace) -> None:
                 }
             else:
                 try:
-                    result = run_executor(payload)
+                    result = _wp_eval_fast(wp_command, executor_path, payload)
                 except Exception as exc:
                     metrics["errors"] += 1
                     result = {
@@ -971,6 +992,7 @@ def stage10(args: argparse.Namespace) -> None:
             write_log_line(result)
 
     finally:
+        _WP_EVAL_FAST_ENV = previous_fast_env
         for handle in log_handles.values():
             try:
                 handle.close()
