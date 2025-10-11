@@ -166,19 +166,55 @@ def ensure_summary_paths(run_dir: Path, explicit: Iterable[str]) -> List[Path]:
     return summary_paths
 
 
-def load_import_report(path: Path) -> Mapping[str, List[Mapping[str, Any]]]:
+def is_action(record: Mapping[str, Any], name: str) -> bool:
+    actions = record.get("actions") if isinstance(record, Mapping) else None
+    if not isinstance(actions, list):
+        return False
+    for action in actions:
+        if isinstance(action, str) and action == name:
+            return True
+    return False
+
+
+def load_import_report(path: Path) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(f"Falta import-report: {path}")
     with path.open("r", encoding="utf-8") as fh:
         data = json.load(fh)
-    if not isinstance(data, Mapping):
-        raise ValueError("import-report.json inválido")
-    created = data.get("created")
-    updated = data.get("updated")
-    skipped = data.get("skipped")
-    if not isinstance(created, list) or not isinstance(updated, list) or not isinstance(skipped, list):
-        raise ValueError("Estructura inesperada en import-report.json")
-    return {"created": created, "updated": updated, "skipped": skipped}
+    if isinstance(data, Mapping) and all(key in data for key in ("created", "updated", "skipped")):
+        created = data.get("created") or []
+        updated = data.get("updated") or []
+        skipped = data.get("skipped") or []
+        if not isinstance(created, list) or not isinstance(updated, list) or not isinstance(skipped, list):
+            raise ValueError("Estructura inesperada en import-report.json (keys=created,updated,skipped)")
+        metrics = data.get("metrics") if isinstance(data.get("metrics"), Mapping) else {}
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "metrics": dict(metrics),
+        }
+
+    if isinstance(data, Mapping) and "results" in data and "metrics" in data:
+        results_raw = data.get("results") or []
+        records: List[Dict[str, Any]] = []
+        if isinstance(results_raw, list):
+            for item in results_raw:
+                if isinstance(item, Mapping):
+                    records.append(dict(item))
+        created = [record for record in records if is_action(record, "created")]
+        updated = [record for record in records if is_action(record, "updated")]
+        skipped = [record for record in records if record.get("skipped")]
+        metrics = data.get("metrics") if isinstance(data.get("metrics"), Mapping) else {}
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "metrics": dict(metrics),
+        }
+
+    found = list(data.keys()) if isinstance(data, Mapping) else type(data).__name__
+    raise ValueError(f"Estructura inesperada en import-report.json (keys={found})")
 
 
 def collect_samples(created: List[Mapping[str, Any]], updated: List[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -229,6 +265,7 @@ def stage11(args: argparse.Namespace) -> None:
     created = report.get("created", [])
     updated = report.get("updated", [])
     skipped = report.get("skipped", [])
+    report_metrics = report.get("metrics") if isinstance(report.get("metrics"), Mapping) else {}
 
     counts = {
         "created": len(created),
@@ -261,6 +298,12 @@ def stage11(args: argparse.Namespace) -> None:
         log.write(
             f"Conteos → created={counts['created']} updated={counts['updated']} skipped={counts['skipped']}\n"
         )
+        if report_metrics:
+            log.write(
+                "Métricas import → "
+                + json.dumps(report_metrics, ensure_ascii=False, sort_keys=True)
+                + "\n"
+            )
         if not samples:
             log.write("Sin muestras para verificar.\n")
         if real_mode:
@@ -476,6 +519,8 @@ def stage11(args: argparse.Namespace) -> None:
         "wp_errors": wp_errors,
         "mode": "wp" if real_mode else "simulation",
     }
+    if report_metrics:
+        metrics["import_metrics"] = report_metrics
 
     update_summary(summary_paths, "stage_11", metrics)
 
