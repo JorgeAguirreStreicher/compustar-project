@@ -81,6 +81,12 @@ class Compu_Stage_Normalize {
         $csvRow[$position] = $value;
       }
 
+      // [COMPUSTAR][ADD] enrich Nombre y sumas de stock
+      if ($this->compu_stage02_flag_enabled('ST2_ENRICH_NAME_STOCK')) {
+        $this->compu_stage02_enrich_name_and_stock($assoc);
+      }
+      // [/COMPUSTAR][ADD]
+
       fwrite($jsonHandle, $this->encodeJsonLine($assoc));
       fputcsv($csvHandle, $csvRow, ',', '"', '\\');
     }
@@ -347,6 +353,113 @@ class Compu_Stage_Normalize {
     }
     return $encoded . "\n";
   }
+
+  // [COMPUSTAR][ADD] helpers flag y cálculos de stock
+  private function compu_stage02_flag_enabled(string $name): bool {
+    $raw = getenv($name);
+    if ($raw === false || $raw === '') {
+      return true;
+    }
+    $normalized = strtolower(trim((string) $raw));
+    if ($normalized === '') {
+      return true;
+    }
+    return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+  }
+
+  /**
+   * @param array<string,mixed> $assoc
+   */
+  private function compu_stage02_enrich_name_and_stock(array &$assoc): void {
+    $marca  = isset($assoc['Marca']) ? (string) $assoc['Marca'] : '';
+    $modelo = isset($assoc['Modelo']) ? (string) $assoc['Modelo'] : '';
+    $titulo = isset($assoc['Titulo']) ? (string) $assoc['Titulo'] : '';
+
+    $nombre = trim($marca . ' ' . $modelo . ' ' . $titulo);
+    if ($nombre !== '') {
+      $normalized = preg_replace('/\s+/', ' ', $nombre);
+      if (is_string($normalized) && $normalized !== '') {
+        $nombre = trim($normalized);
+      }
+    }
+    $assoc['Nombre'] = $nombre;
+
+    $branchColumns = [
+      'Chihuahua' => true,
+      'Cd_Juarez' => true,
+      'Guadalajara' => true,
+      'Los_Mochis' => true,
+      'Merida' => true,
+      'Mexico_Norte' => true,
+      'Mexico_Sur' => true,
+      'Monterrey' => true,
+      'Puebla' => true,
+      'Queretaro' => true,
+      'Villahermosa' => true,
+      'Leon' => true,
+      'Hermosillo' => true,
+      'San_Luis_Potosi' => true,
+      'Torreon' => true,
+      'Chihuahua_CEDIS' => true,
+      'Toluca' => true,
+      'Tijuana' => true,
+    ];
+
+    $total = 0.0;
+    $sinTijuana = 0.0;
+
+    foreach ($assoc as $key => $value) {
+      $numeric = $this->compu_stage02_parse_stock($value);
+      if ($numeric <= 0) {
+        continue;
+      }
+
+      $keyStr = (string) $key;
+      $isBranch = isset($branchColumns[$keyStr]);
+      $isStockPrefix = stripos($keyStr, 'Stock_') === 0;
+      if (!$isBranch && !$isStockPrefix) {
+        continue;
+      }
+
+      $isTijuana = (strcasecmp($keyStr, 'Tijuana') === 0 || strcasecmp($keyStr, 'Stock_Tijuana') === 0);
+
+      $total += $numeric;
+      if (!$isTijuana) {
+        $sinTijuana += $numeric;
+      }
+    }
+
+    $assoc['Stock_Suma_Sin_Tijuana'] = (int) round($sinTijuana);
+    $assoc['Stock_Suma_Total'] = (int) round($total);
+  }
+
+  private function compu_stage02_parse_stock($value): float {
+    if ($value === null || $value === '') {
+      return 0.0;
+    }
+    if (is_int($value) || is_float($value)) {
+      $numeric = (float) $value;
+    } elseif (is_string($value)) {
+      $clean = preg_replace('/[^0-9.,-]/', '', $value);
+      if ($clean === null || $clean === '' || $clean === '-') {
+        return 0.0;
+      }
+      $clean = str_replace(',', '', $clean);
+      if ($clean === '' || $clean === '-' || !is_numeric($clean)) {
+        return 0.0;
+      }
+      $numeric = (float) $clean;
+    } else {
+      return 0.0;
+    }
+
+    if (!is_finite($numeric)) {
+      return 0.0;
+    }
+
+    return max($numeric, 0.0);
+  }
+  // [/COMPUSTAR][ADD]
 
   private function sanitizeValue(string $value): string {
     if ($value === '') {

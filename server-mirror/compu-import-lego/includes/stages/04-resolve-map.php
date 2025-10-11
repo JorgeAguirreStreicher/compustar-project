@@ -74,6 +74,21 @@ class Compu_Stage_Resolve_Map {
     $blockedLvl1    = 0;
     $statusCounts   = [];
 
+    // [COMPUSTAR][ADD] Contexto para márgenes dinámicos
+    $compuMarginContext = [
+      'enabled' => $this->compu_stage04_flag_enabled('ST4_ENRICH_MARGIN'),
+      'lookup'  => [],
+      'default' => 0.15,
+      'updates' => [],
+    ];
+    if ($compuMarginContext['enabled']) {
+      $compuMarginContext['lookup'] = $this->compu_stage04_load_margin_lookup($logHandle);
+      if (empty($compuMarginContext['lookup'])) {
+        $this->log($logHandle, 'info', 'ST4_ENRICH_MARGIN activo sin datos de margen; se usará default 0.15.', []);
+      }
+    }
+    // [/COMPUSTAR][ADD]
+
     while (($line = fgets($inputHandle)) !== false) {
       $line = trim($line);
       if ($line === '') {
@@ -114,6 +129,24 @@ class Compu_Stage_Resolve_Map {
         unset($decoded['resolve_reason']);
       }
 
+      // [COMPUSTAR][ADD] Aplicar margen por SKU
+      if ($compuMarginContext['enabled']) {
+        $skuValue = $this->stringValue($decoded['SKU'] ?? ($decoded['sku'] ?? ''));
+        $marginData = $this->compu_stage04_resolve_margin($skuValue, $compuMarginContext['lookup'], $compuMarginContext['default']);
+        $decoded['margin_pct'] = $marginData['margin'];
+        if ($marginData['default']) {
+          $decoded['margin_default'] = true;
+        }
+        if ($skuValue !== '') {
+          $upperSku = strtoupper($skuValue);
+          $compuMarginContext['updates'][$upperSku] = ['margin_pct' => $marginData['margin']];
+          if ($marginData['default']) {
+            $compuMarginContext['updates'][$upperSku]['margin_default'] = true;
+          }
+        }
+      }
+      // [/COMPUSTAR][ADD]
+
       if (!isset($statusCounts[$status])) {
         $statusCounts[$status] = 0;
       }
@@ -133,6 +166,12 @@ class Compu_Stage_Resolve_Map {
 
     fclose($inputHandle);
     fclose($outputHandle);
+
+    // [COMPUSTAR][ADD] Fusionar margen en validated.jsonl
+    if ($compuMarginContext['enabled'] && !empty($compuMarginContext['updates'])) {
+      $this->compu_stage04_merge_margin_into_validated($validated, $compuMarginContext['updates'], $logHandle);
+    }
+    // [/COMPUSTAR][ADD]
 
     $summary = [
       'rows_in'       => $rowsIn,
@@ -376,6 +415,232 @@ class Compu_Stage_Resolve_Map {
 
     file_put_contents($path, implode("\n", $lines) . "\n");
   }
+
+  // [COMPUSTAR][ADD] helpers de margen y merge validated
+  private function compu_stage04_flag_enabled(string $name): bool {
+    $raw = getenv($name);
+    if ($raw === false || $raw === '') {
+      return true;
+    }
+    $normalized = strtolower(trim((string) $raw));
+    if ($normalized === '') {
+      return true;
+    }
+    return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+  }
+
+  /**
+   * @param resource $logHandle
+   * @return array<string,float>
+   */
+  private function compu_stage04_load_margin_lookup($logHandle): array {
+    $lookup = [];
+
+    global $wpdb;
+    if (!isset($wpdb) || !is_object($wpdb)) {
+      $this->log($logHandle, 'warning', 'wpdb no disponible; se usará margen por defecto.', []);
+      return $lookup;
+    }
+
+    $prefix = property_exists($wpdb, 'prefix') ? (string) $wpdb->prefix : '';
+    $candidates = [];
+    $candidates[] = 'wp_compu_cats_map';
+    if ($prefix !== '' && $prefix !== 'wp_') {
+      $candidates[] = $prefix . 'compu_cats_map';
+    }
+    $candidates[] = 'compu_cats_map';
+    if ($prefix !== '' && $prefix !== 'wp_') {
+      $candidates[] = $prefix . 'compu_cats_map';
+    }
+
+    $seen = [];
+    foreach ($candidates as $candidate) {
+      if ($candidate === '' || isset($seen[$candidate])) {
+        continue;
+      }
+      $seen[$candidate] = true;
+
+      try {
+        $rows = $wpdb->get_results("SELECT * FROM {$candidate} LIMIT 1000", ARRAY_A);
+      } catch (\Throwable $th) {
+        $this->log($logHandle, 'warning', 'Error consultando tabla de márgenes.', [
+          'table' => $candidate,
+          'error' => $th->getMessage(),
+        ]);
+        continue;
+      }
+
+      if (!is_array($rows) || empty($rows)) {
+        continue;
+      }
+
+      foreach ($rows as $row) {
+        if (!is_array($row)) {
+          continue;
+        }
+        $sku = $this->compu_stage04_extract_sku($row);
+        $margin = $this->compu_stage04_extract_margin($row);
+        if ($sku === '' || $margin === null) {
+          continue;
+        }
+        $lookup[strtoupper($sku)] = $this->compu_stage04_normalize_margin($margin);
+      }
+
+      if (!empty($lookup)) {
+        break;
+      }
+    }
+
+    return $lookup;
+  }
+
+  /**
+   * @param array<string,mixed> $row
+   */
+  private function compu_stage04_extract_sku(array $row): string {
+    foreach ($row as $key => $value) {
+      $lower = strtolower((string) $key);
+      if (strpos($lower, 'sku') === false) {
+        continue;
+      }
+      $stringValue = $this->stringValue($value ?? '');
+      if ($stringValue !== '') {
+        return $stringValue;
+      }
+    }
+    return '';
+  }
+
+  /**
+   * @param array<string,mixed> $row
+   */
+  private function compu_stage04_extract_margin(array $row): ?float {
+    foreach ($row as $key => $value) {
+      $lower = strtolower((string) $key);
+      if (strpos($lower, 'margin') === false) {
+        continue;
+      }
+      $numeric = $this->compu_stage04_to_float($value);
+      if ($numeric === null) {
+        continue;
+      }
+      if ($numeric > 0 && $numeric <= 1) {
+        return $numeric;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * @return array{margin:float,default:bool}
+   */
+  private function compu_stage04_resolve_margin(string $sku, array $lookup, float $default): array {
+    $margin = $default;
+    $usedDefault = true;
+    if ($sku !== '') {
+      $key = strtoupper($sku);
+      if (isset($lookup[$key])) {
+        $margin = $lookup[$key];
+        $usedDefault = false;
+      }
+    }
+    return [
+      'margin' => $this->compu_stage04_normalize_margin($margin),
+      'default' => $usedDefault,
+    ];
+  }
+
+  private function compu_stage04_normalize_margin($value): float {
+    $numeric = $this->compu_stage04_to_float($value);
+    if ($numeric === null) {
+      return 0.15;
+    }
+    if ($numeric < 0) {
+      $numeric = 0.0;
+    }
+    return (float) sprintf('%.4f', $numeric);
+  }
+
+  private function compu_stage04_to_float($value): ?float {
+    if ($value === null || $value === '') {
+      return null;
+    }
+    if (is_float($value) || is_int($value)) {
+      return (float) $value;
+    }
+    if (is_string($value)) {
+      $clean = preg_replace('/[^0-9.,-]/', '', $value);
+      if ($clean === null || $clean === '' || $clean === '-') {
+        return null;
+      }
+      $clean = str_replace(',', '', $clean);
+      if ($clean === '' || $clean === '-' || !is_numeric($clean)) {
+        return null;
+      }
+      return (float) $clean;
+    }
+    return null;
+  }
+
+  /**
+   * @param array<string,array<string,mixed>> $updates
+   * @param resource $logHandle
+   */
+  private function compu_stage04_merge_margin_into_validated(string $path, array $updates, $logHandle): void {
+    if (!is_file($path)) {
+      $this->log($logHandle, 'warning', 'validated.jsonl no existe; no se pudo fusionar margin_pct.', [
+        'path' => $path,
+      ]);
+      return;
+    }
+
+    $lines = file($path, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+      $this->log($logHandle, 'warning', 'No se pudo leer validated.jsonl para fusionar márgenes.', [
+        'path' => $path,
+      ]);
+      return;
+    }
+
+    $updatedLines = [];
+    foreach ($lines as $line) {
+      $trimmed = trim((string) $line);
+      if ($trimmed === '') {
+        $updatedLines[] = $line;
+        continue;
+      }
+      $decoded = json_decode($trimmed, true);
+      if (!is_array($decoded)) {
+        $updatedLines[] = $line;
+        continue;
+      }
+      $skuValue = $this->stringValue($decoded['SKU'] ?? ($decoded['sku'] ?? ''));
+      if ($skuValue !== '') {
+        $upperSku = strtoupper($skuValue);
+        if (isset($updates[$upperSku])) {
+          foreach ($updates[$upperSku] as $field => $value) {
+            if ($field === 'margin_pct') {
+              $decoded[$field] = $this->compu_stage04_normalize_margin($value);
+            } elseif ($field === 'margin_default') {
+              $decoded[$field] = (bool) $value;
+            } else {
+              $decoded[$field] = $value;
+            }
+          }
+        }
+      }
+
+      $encoded = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+      if ($encoded === false) {
+        $updatedLines[] = $line;
+        continue;
+      }
+      $updatedLines[] = $encoded;
+    }
+
+    file_put_contents($path, implode("\n", $updatedLines) . "\n");
+  }
+  // [/COMPUSTAR][ADD]
 
   private function cli_success(string $message): void {
     if (class_exists('\\WP_CLI')) {

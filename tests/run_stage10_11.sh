@@ -84,6 +84,25 @@ $PYTHON python/stage10_import.py \
   --wp-path "$WP_PATH" \
   --wp-args "$WP_PATH_ARGS"
 
+echo "\nVerificando guardia de precio en stage10_apply_fast.php..."
+GUARD_LOG="$RUN_DIR/stage10_guard.log"
+GUARD_PAYLOAD='{"sku":"GUARD-PRICE","exists":1,"id":123,"category_term":501,"price":0,"price_mxn_iva16_rounded":0,"price_mxn_iva8_rounded":0,"price_invalid":true}'
+STUB_PRELUDE="$(pwd)/tests/stubs/stage10_wp_prelude.php"
+if ! GUARD_OUTPUT=$(STAGE10_GUARD_LOG="$GUARD_LOG" php -d auto_prepend_file="$STUB_PRELUDE" \
+  server-mirror/compu-import-lego/compu-import-lego/includes/stages/stage10_apply_fast.php "$GUARD_PAYLOAD"); then
+  echo "stage10_apply_fast guard test falló" >&2
+  exit 1
+fi
+echo "$GUARD_OUTPUT"
+if [[ "$GUARD_OUTPUT" != *"skipped_price_zero"* ]]; then
+  echo "La salida de stage10_apply_fast no incluye skipped_price_zero" >&2
+  exit 1
+fi
+if [[ -f "$GUARD_LOG" ]] && grep -q "_price" "$GUARD_LOG"; then
+  echo "Guardia de precio permitió actualizar _price/_regular_price" >&2
+  exit 1
+fi
+
 $PYTHON python/stage11_postcheck.py \
   --run-dir "$RUN_DIR" \
   --import-report "$RUN_DIR/final/import-report.json" \

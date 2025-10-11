@@ -108,6 +108,78 @@ for path in "$DOCS_STAGE04/resolved.jsonl" "$DOCS_STAGE04/logs/stage-04.log" "$D
   fi
 done
 
+python - "$RUN_DIR/resolved.jsonl" "$RUN_DIR/validated.jsonl" <<'PY'
+import json
+import math
+import sys
+from pathlib import Path
+
+resolved_path = Path(sys.argv[1])
+validated_path = Path(sys.argv[2])
+
+def read_first(path: Path, limit: int):
+    rows = []
+    with path.open(encoding="utf-8", errors="ignore") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+            if len(rows) >= limit:
+                break
+    return rows
+
+resolved_rows = read_first(resolved_path, 5)
+if not resolved_rows:
+    sys.stderr.write("resolved.jsonl vacío\n")
+    sys.exit(1)
+
+validated_rows = read_first(validated_path, 5)
+if not validated_rows:
+    sys.stderr.write("validated.jsonl vacío\n")
+    sys.exit(1)
+
+def ensure_margin(row, label):
+    if "margin_pct" not in row:
+        sys.stderr.write(f"{label} sin margin_pct\n")
+        sys.exit(1)
+    margin = row["margin_pct"]
+    if not isinstance(margin, (int, float)):
+        sys.stderr.write(f"{label} margin_pct debe ser numérico\n")
+        sys.exit(1)
+    if margin < 0 or margin > 1:
+        sys.stderr.write(f"{label} margin_pct fuera de rango\n")
+        sys.exit(1)
+    if "margin_default" in row and not isinstance(row["margin_default"], bool):
+        sys.stderr.write(f"{label} margin_default debe ser booleano\n")
+        sys.exit(1)
+    return margin
+
+resolved_margins = {}
+for row in resolved_rows:
+    sku = row.get("SKU") or row.get("sku")
+    if not sku:
+        continue
+    resolved_margins[sku] = ensure_margin(row, "resolved")
+
+if not resolved_margins:
+    sys.stderr.write("No se encontraron SKUs con margen en resolved.jsonl\n")
+    sys.exit(1)
+
+for row in validated_rows:
+    sku = row.get("SKU") or row.get("sku")
+    if not sku or sku not in resolved_margins:
+        continue
+    margin = ensure_margin(row, "validated")
+    if not math.isclose(margin, resolved_margins[sku], rel_tol=1e-6, abs_tol=1e-6):
+        sys.stderr.write("validated.jsonl no coincide con margin_pct de resolved.jsonl\n")
+        sys.exit(1)
+    break
+else:
+    sys.stderr.write("No se pudo confirmar margin_pct en validated.jsonl\n")
+    sys.exit(1)
+PY
+
 echo "RUN_DIR: $RUN_DIR"
 
 echo "Artefactos principales:"

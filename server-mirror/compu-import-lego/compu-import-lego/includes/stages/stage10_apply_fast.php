@@ -49,6 +49,68 @@ function compu_stage10_format_int($value): int
     return (int) round((float) $value);
 }
 
+// [COMPUSTAR][ADD] helpers guardia precio cero
+function compu_stage10_flag_enabled(string $name): bool
+{
+    $raw = getenv($name);
+    if ($raw === false || $raw === '') {
+        return true;
+    }
+    $normalized = strtolower(trim((string) $raw));
+    if ($normalized === '') {
+        return true;
+    }
+    return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+}
+
+function compu_stage10_value_truthy($value): ?bool
+{
+    if (is_bool($value)) {
+        return $value;
+    }
+    if (is_int($value)) {
+        return $value !== 0;
+    }
+    if (is_string($value)) {
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            return null;
+        }
+        if (in_array($normalized, ['1', 'true', 'yes', 'on', 'y'], true)) {
+            return true;
+        }
+        if (in_array($normalized, ['0', 'false', 'no', 'off', 'n'], true)) {
+            return false;
+        }
+    }
+    return null;
+}
+
+function compu_stage10_should_skip_price(array $payload, float $price): bool
+{
+    if (!compu_stage10_flag_enabled('ST10_GUARD_PRICE_ZERO')) {
+        return false;
+    }
+    if ($price <= 0.0) {
+        return true;
+    }
+    if (array_key_exists('price_mxn_iva16_rounded', $payload) && array_key_exists('price_mxn_iva8_rounded', $payload)) {
+        $p16 = (float) $payload['price_mxn_iva16_rounded'];
+        $p08 = (float) $payload['price_mxn_iva8_rounded'];
+        if ($p16 <= 0.0 && $p08 <= 0.0) {
+            return true;
+        }
+    }
+    if (array_key_exists('price_invalid', $payload)) {
+        $normalized = compu_stage10_value_truthy($payload['price_invalid']);
+        if ($normalized === true) {
+            return true;
+        }
+    }
+    return false;
+}
+// [/COMPUSTAR][ADD]
+
 function compu_stage10_output(array $result, int $exitCode = 0): void
 {
     echo json_encode($result, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . PHP_EOL;
@@ -219,6 +281,11 @@ try {
         compu_stage10_set_stock($productId, $payload, $result['actions']);
         $price = compu_stage10_format_float($payload['price'] ?? 0.0);
         $salePrice = isset($payload['sale_price']) ? compu_stage10_format_float($payload['sale_price']) : null;
+        if (compu_stage10_should_skip_price($payload, $price)) {
+            $result['skipped'][] = 'price_zero_guard';
+            $result['skipped_price_zero'] = true;
+            compu_stage10_output($result, 0);
+        }
         compu_stage10_update_price($productId, $price, $salePrice, $result['actions'], $result['skipped']);
         compu_stage10_set_audit_meta($productId, $payload, $result['actions']);
         compu_stage10_publish($productId, $result['actions'], $result['errors']);
@@ -276,6 +343,11 @@ try {
 
     $price = compu_stage10_format_float($payload['price'] ?? 0.0);
     $salePrice = isset($payload['sale_price']) ? compu_stage10_format_float($payload['sale_price']) : null;
+    if (compu_stage10_should_skip_price($payload, $price)) {
+        $result['skipped'][] = 'price_zero_guard';
+        $result['skipped_price_zero'] = true;
+        compu_stage10_output($result, 0);
+    }
     compu_stage10_update_price($productId, $price, $salePrice, $result['actions'], $result['skipped']);
 
     wp_set_object_terms($productId, ['simple'], 'product_type', false);
