@@ -174,6 +174,19 @@ foreach ($expectedFields as $field) {
   }
 }
 
+foreach (['Nombre', 'Stock_Suma_Sin_Tijuana', 'Stock_Suma_Total'] as $field) {
+  if (!array_key_exists($field, $row02)) {
+    throw new RuntimeException("Campo faltante en Stage02: {$field}");
+  }
+}
+
+if ((int) ($row02['Stock_Suma_Sin_Tijuana'] ?? -1) !== 3) {
+  throw new RuntimeException('Stock_Suma_Sin_Tijuana incorrecto');
+}
+if ((int) ($row02['Stock_Suma_Total'] ?? -1) !== 5) {
+  throw new RuntimeException('Stock_Suma_Total incorrecto');
+}
+
 if (abs($row02['cost_usd'] - 10.0) > 0.001) { throw new RuntimeException('cost_usd incorrecto'); }
 if (abs($row02['exchange_rate'] - 17.5) > 0.001) { throw new RuntimeException('exchange_rate incorrecto'); }
 if ((int)$row02['stock_total'] !== 5) { throw new RuntimeException('stock_total incorrecto'); }
@@ -204,5 +217,19 @@ require __DIR__.'/../server-mirror/compu-import-lego/includes/stages/09-pricing.
 $snapshot = $FAKE_PRODUCTS[101]->snapshot();
 if ($snapshot['regular_price'] >= 999.0) { throw new RuntimeException('Stage09 no actualizó el precio'); }
 if ($snapshot['stock_qty'] !== 5) { throw new RuntimeException('Stage09 no propagó stock_total'); }
+
+$resolvedLines = file($runDir.'/resolved.jsonl', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+if (!$resolvedLines) { throw new RuntimeException('resolved.jsonl vacío tras Stage09'); }
+$resolvedRow = json_decode($resolvedLines[0], true);
+if (!is_array($resolvedRow)) { throw new RuntimeException('resolved.jsonl inválido tras Stage09'); }
+if (!isset($resolvedRow['price_mxn_iva16_rounded']) || (int) $resolvedRow['price_mxn_iva16_rounded'] <= 0) {
+  throw new RuntimeException('price_mxn_iva16_rounded ausente o inválido');
+}
+if (!isset($resolvedRow['price_mxn_iva8_rounded']) || (int) $resolvedRow['price_mxn_iva8_rounded'] <= 0) {
+  throw new RuntimeException('price_mxn_iva8_rounded ausente o inválido');
+}
+if (!empty($resolvedRow['price_invalid'])) {
+  throw new RuntimeException('price_invalid no debería marcarse en escenario válido');
+}
 
 echo "OK: pipeline canónico operando con cost_usd/exchange_rate/stock_total\n";

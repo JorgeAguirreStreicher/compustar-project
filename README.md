@@ -187,3 +187,11 @@ python3 python/stage11_postcheck.py \
 - `final/postcheck.json`: `{ mode: "wp", writer: "wp", diffs: <n>, checks: { ... } }` con resultados agregados.
 
 Revisar manualmente una muestra en WooCommerce (ID, categoría, marca, imagen y metas `_price`, `_stock`, `_weight`) para confirmar que Stage 11 cierre sin diferencias (`diffs: 0`).
+
+#### Campos enriquecidos y guardias recientes
+- Stage 02 agrega `Nombre`, `Stock_Suma_Sin_Tijuana` y `Stock_Suma_Total` cuando `ST2_ENRICH_NAME_STOCK=1` (por defecto) para facilitar el traspaso de inventarios a stages posteriores.
+- Stage 04 propaga `margin_pct` (o `margin_default=true` con 0.15) bajo `ST4_ENRICH_MARGIN=1`, sincronizando `resolved.jsonl` y `validated.jsonl`.
+- Stage 09 calcula `price_mxn_iva16_rounded`, `price_mxn_iva8_rounded` y `price_invalid` con `ST9_ENRICH_PRICES=1`, incluyendo la función de redondeo 0/5/9 hacia abajo.
+- Stage 10 impide publicar precios en cero o marcados como inválidos con `ST10_GUARD_PRICE_ZERO=1`, registrando `skipped_price_zero` en la respuesta.
+
+Consulta `docs/runs/stage-feature-flags.md` para detalles de activación/desactivación por entorno.

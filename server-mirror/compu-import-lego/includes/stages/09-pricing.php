@@ -46,6 +46,23 @@ if (!function_exists('compu_stage09_round_margin')) {
   }
 }
 
+// [COMPUSTAR][ADD] round_down_059
+if (!function_exists('compu_round_down_059')) {
+  function compu_round_down_059($x) {
+    $i = (int) floor($x);
+    $d = $i % 10;
+    if ($d >= 9) {
+      $i -= ($d - 9);
+    } elseif ($d >= 5) {
+      $i -= ($d - 5);
+    } else {
+      $i -= $d;
+    }
+    return max($i, 0);
+  }
+}
+// [/COMPUSTAR][ADD]
+
 if (!function_exists('compu_stage09_normalize_bool')) {
   /** @param mixed $value */
   function compu_stage09_normalize_bool($value): ?bool {
@@ -70,6 +87,207 @@ if (!function_exists('compu_stage09_normalize_bool')) {
     return null;
   }
 }
+
+// [COMPUSTAR][ADD] helpers para enriquecimiento de precios
+if (!function_exists('compu_stage09_flag_enabled')) {
+  function compu_stage09_flag_enabled(string $name): bool {
+    $raw = getenv($name);
+    if ($raw === false || $raw === '') {
+      return true;
+    }
+    $normalized = strtolower(trim((string) $raw));
+    if ($normalized === '') {
+      return true;
+    }
+    return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+  }
+}
+
+if (!function_exists('compu_stage09_to_float')) {
+  function compu_stage09_to_float($value): ?float {
+    if ($value === null || $value === '') {
+      return null;
+    }
+    if (is_float($value) || is_int($value)) {
+      return (float) $value;
+    }
+    if (is_string($value)) {
+      $clean = preg_replace('/[^0-9.,-]/', '', $value);
+      if ($clean === null || $clean === '' || $clean === '-') {
+        return null;
+      }
+      $clean = str_replace(',', '', $clean);
+      if ($clean === '' || $clean === '-' || !is_numeric($clean)) {
+        return null;
+      }
+      return (float) $clean;
+    }
+    return null;
+  }
+}
+
+if (!function_exists('compu_stage09_extract_sku')) {
+  /** @param array<string,mixed> $row */
+  function compu_stage09_extract_sku(array $row): string {
+    if (isset($row['SKU'])) {
+      $value = (string) $row['SKU'];
+      if ($value !== '') {
+        return trim($value);
+      }
+    }
+    if (isset($row['sku'])) {
+      $value = (string) $row['sku'];
+      if ($value !== '') {
+        return trim($value);
+      }
+    }
+    foreach ($row as $key => $value) {
+      $lower = strtolower((string) $key);
+      if (strpos($lower, 'sku') === false) {
+        continue;
+      }
+      $stringValue = trim((string) $value);
+      if ($stringValue !== '') {
+        return $stringValue;
+      }
+    }
+    return '';
+  }
+}
+
+if (!function_exists('compu_stage09_load_margin_lookup')) {
+  function compu_stage09_load_margin_lookup(string $resolvedPath, string $validatedPath): array {
+    $lookup = [];
+    foreach ([$resolvedPath, $validatedPath] as $path) {
+      if ($path === '' || !is_file($path)) {
+        continue;
+      }
+      $lines = file($path, FILE_IGNORE_NEW_LINES);
+      if ($lines === false) {
+        continue;
+      }
+      foreach ($lines as $line) {
+        $trimmed = trim((string) $line);
+        if ($trimmed === '') {
+          continue;
+        }
+        $decoded = json_decode($trimmed, true);
+        if (!is_array($decoded)) {
+          continue;
+        }
+        if (!array_key_exists('margin_pct', $decoded)) {
+          continue;
+        }
+        $margin = compu_stage09_to_float($decoded['margin_pct']);
+        if ($margin === null) {
+          continue;
+        }
+        if ($margin < 0) {
+          $margin = 0.0;
+        }
+        $sku = compu_stage09_extract_sku($decoded);
+        if ($sku === '') {
+          continue;
+        }
+        $lookup[strtoupper($sku)] = (float) sprintf('%.4f', $margin);
+      }
+      if (!empty($lookup)) {
+        break;
+      }
+    }
+    return $lookup;
+  }
+}
+
+if (!function_exists('compu_stage09_build_price_update')) {
+  function compu_stage09_build_price_update(string $sku, $usdRaw, $fxRaw, array $marginLookup, float $defaultMargin): array {
+    $usd = compu_stage09_to_float($usdRaw);
+    $fx  = compu_stage09_to_float($fxRaw);
+    $margin = $defaultMargin;
+    if ($sku !== '') {
+      $key = strtoupper($sku);
+      if (isset($marginLookup[$key])) {
+        $margin = (float) $marginLookup[$key];
+      }
+    }
+    if ($margin < 0) {
+      $margin = 0.0;
+    }
+
+    $result = [
+      'price_mxn_iva16_rounded' => 0,
+      'price_mxn_iva8_rounded'  => 0,
+    ];
+
+    $invalid = false;
+    if ($usd === null || $usd <= 0 || $fx === null || $fx <= 0) {
+      $invalid = true;
+    } else {
+      $baseMxn = $usd * $fx;
+      $precioMargen = $baseMxn * (1 + $margin);
+      $p16 = $precioMargen * 1.16;
+      $p08 = $precioMargen * 1.08;
+      $rounded16 = (int) compu_round_down_059($p16);
+      $rounded08 = (int) compu_round_down_059($p08);
+      $result['price_mxn_iva16_rounded'] = $rounded16;
+      $result['price_mxn_iva8_rounded'] = $rounded08;
+      if ($rounded16 <= 0 && $rounded08 <= 0) {
+        $invalid = true;
+      }
+    }
+
+    if ($invalid) {
+      $result['price_mxn_iva16_rounded'] = 0;
+      $result['price_mxn_iva8_rounded'] = 0;
+      $result['price_invalid'] = true;
+    }
+
+    return $result;
+  }
+}
+
+if (!function_exists('compu_stage09_merge_price_updates')) {
+  function compu_stage09_merge_price_updates(string $path, array $updates): void {
+    if ($path === '' || empty($updates) || !is_file($path)) {
+      return;
+    }
+    $lines = file($path, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+      SLOG09('No se pudo leer archivo para fusionar precios: ' . $path);
+      return;
+    }
+    $output = [];
+    foreach ($lines as $line) {
+      $trimmed = trim((string) $line);
+      if ($trimmed === '') {
+        $output[] = $line;
+        continue;
+      }
+      $decoded = json_decode($trimmed, true);
+      if (!is_array($decoded)) {
+        $output[] = $line;
+        continue;
+      }
+      $sku = compu_stage09_extract_sku($decoded);
+      if ($sku !== '') {
+        $upper = strtoupper($sku);
+        if (isset($updates[$upper])) {
+          foreach ($updates[$upper] as $field => $value) {
+            $decoded[$field] = $value;
+          }
+        }
+      }
+      $encoded = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+      if ($encoded === false) {
+        $output[] = $line;
+        continue;
+      }
+      $output[] = $encoded;
+    }
+    file_put_contents($path, implode("\n", $output) . "\n");
+  }
+}
+// [/COMPUSTAR][ADD]
 
 if (!function_exists('compu_stage09_run')) {
   /**
@@ -131,6 +349,24 @@ if (!function_exists('compu_stage09_run')) {
     if (!is_dir($runDir)) {
       $result['errors'][] = 'run_dir_not_found: Directorio inexistente (' . $runDir . ').';
       return $result;
+    }
+
+    $priceEnrichment = [
+      'enabled' => compu_stage09_flag_enabled('ST9_ENRICH_PRICES'),
+      'resolved_path' => rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'resolved.jsonl',
+      'validated_path' => rtrim($runDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'validated.jsonl',
+      'margin_lookup' => [],
+      'default_margin' => 0.15,
+      'updates' => [],
+    ];
+    if ($priceEnrichment['enabled']) {
+      $priceEnrichment['margin_lookup'] = compu_stage09_load_margin_lookup(
+        $priceEnrichment['resolved_path'],
+        $priceEnrichment['validated_path']
+      );
+      if (empty($priceEnrichment['margin_lookup'])) {
+        SLOG09('ST9_ENRICH_PRICES activo: usando margen por defecto 0.15 (sin datos en archivos).');
+      }
     }
 
     $logDir = $runDir . '/logs';
@@ -270,14 +506,28 @@ if (!function_exists('compu_stage09_run')) {
           continue;
         }
 
-        $costUsd = (float) ($offer['cost_usd'] ?? 0);
-        $fx      = (float) ($offer['exchange_rate'] ?? 0);
+        $costUsdRaw = $offer['cost_usd'] ?? 0;
+        $fxRaw      = $offer['exchange_rate'] ?? 0;
+        $costUsd = (float) $costUsdRaw;
+        $fx      = (float) $fxRaw;
         $stock   = (int)   ($offer['stock_total'] ?? 0);
         if ($costUsd <= 0 || $fx <= 0) {
           $fx = max($fx, 1.0);
         }
 
         $baseMxn = $costUsd * ($fx > 0 ? $fx : 1.0);
+        if ($priceEnrichment['enabled']) {
+          $skuString = is_string($sku) ? $sku : (string) $sku;
+          if ($skuString !== '') {
+            $priceEnrichment['updates'][strtoupper($skuString)] = compu_stage09_build_price_update(
+              $skuString,
+              $costUsdRaw,
+              $fxRaw,
+              $priceEnrichment['margin_lookup'],
+              $priceEnrichment['default_margin']
+            );
+          }
+        }
         $margin  = 0.15; // TODO: enlazar con tabla de márgenes
         $target  = compu_stage09_round_margin($baseMxn * (1 + $margin) * (1 + ($iva / 100)));
 
@@ -313,6 +563,11 @@ if (!function_exists('compu_stage09_run')) {
           $result['stats']['unchanged']++;
           fputcsv($csvHandles['keep'], [$sku, $before], ',', '"', '\\');
         }
+      }
+
+      if ($priceEnrichment['enabled'] && !empty($priceEnrichment['updates'])) {
+        compu_stage09_merge_price_updates($priceEnrichment['resolved_path'], $priceEnrichment['updates']);
+        compu_stage09_merge_price_updates($priceEnrichment['validated_path'], $priceEnrichment['updates']);
       }
 
       $result['status'] = 'ok';

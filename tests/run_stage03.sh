@@ -120,6 +120,18 @@ if not validated_rows:
     sys.stderr.write("validated.jsonl está vacío\n")
     sys.exit(1)
 
+expected_new_fields = ["Nombre", "Stock_Suma_Sin_Tijuana", "Stock_Suma_Total"]
+for idx, row in enumerate(validated_rows[:3], 1):
+    for field in expected_new_fields:
+        if field not in row:
+            sys.stderr.write(f"validated.jsonl carece de {field} en las primeras filas (fila {idx})\n")
+            sys.exit(1)
+    sin_tj = row.get("Stock_Suma_Sin_Tijuana")
+    total = row.get("Stock_Suma_Total")
+    if not isinstance(sin_tj, int) or not isinstance(total, int):
+        sys.stderr.write("Los campos de stock agregados deben ser enteros\n")
+        sys.exit(1)
+
 normalized_keys = set()
 for row in normalized_rows:
     normalized_keys.update(row.keys())
