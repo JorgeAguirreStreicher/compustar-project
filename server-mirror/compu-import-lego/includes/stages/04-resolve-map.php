@@ -97,6 +97,10 @@ class Compu_Stage_Resolve_Map {
     ];
     // [/COMPUSTAR][ADD]
 
+    // [COMPUSTAR][ADD] Contenedor para métricas inline de margen
+    $metrics = [];
+    // [/COMPUSTAR][ADD]
+
     while (($line = fgets($inputHandle)) !== false) {
       $line = trim($line);
       if ($line === '') {
@@ -112,6 +116,12 @@ class Compu_Stage_Resolve_Map {
         ]);
         continue;
       }
+
+      // [COMPUSTAR][ADD] Estado inicial de margen para la fila actual
+      $compuStage04MarginAlreadyPresent = array_key_exists('margin_pct', $decoded);
+      $inlineMarginForResolved = null;
+      $inlineMarginUsedDefault = false;
+      // [/COMPUSTAR][ADD]
 
       $stockData = $this->calculateStocks($decoded);
       $decoded['Almacen_15'] = $stockData['almacen_15'];
@@ -136,6 +146,46 @@ class Compu_Stage_Resolve_Map {
       } elseif (isset($decoded['resolve_reason'])) {
         unset($decoded['resolve_reason']);
       }
+
+      // [COMPUSTAR][ADD] margen en línea junto con la categoría
+      if ((int) getenv('ST4_ENRICH_MARGIN') !== 0) {
+        if (!$compuStage04MarginAlreadyPresent) {
+          global $wpdb;
+
+          $termIdForInlineMargin = null;
+          if (isset($decoded['woo_term_id'])) {
+            $inlineTermCandidate = (int) $decoded['woo_term_id'];
+            if ($inlineTermCandidate > 0) {
+              $termIdForInlineMargin = $inlineTermCandidate;
+            }
+          }
+
+          $vendorL3ForInlineMargin = null;
+          if (isset($decoded['ID_Menu_Nvl_3'])) {
+            $inlineVendorCandidate = (int) $decoded['ID_Menu_Nvl_3'];
+            if ($inlineVendorCandidate > 0) {
+              $vendorL3ForInlineMargin = $inlineVendorCandidate;
+            }
+          }
+
+          $inlineMarginValue = 0.1500;
+          if (isset($wpdb) && is_object($wpdb)) {
+            $inlineMarginValue = compu_inline_get_margin_pct($wpdb, $termIdForInlineMargin, $vendorL3ForInlineMargin);
+          }
+
+          $decoded['margin_pct'] = number_format($inlineMarginValue, 4, '.', '');
+          $inlineMarginForResolved = $decoded['margin_pct'];
+          if ($inlineMarginValue == 0.1500) {
+            $inlineMarginUsedDefault = true;
+          }
+
+          $metrics['margin_inline_assigned'] = ($metrics['margin_inline_assigned'] ?? 0) + 1;
+          if ($inlineMarginValue == 0.1500) {
+            $metrics['margin_inline_default'] = ($metrics['margin_inline_default'] ?? 0) + 1;
+          }
+        }
+      }
+      // [/COMPUSTAR][ADD]
 
       // [COMPUSTAR][ADD] Aplicar margen por SKU
       if ($compuMarginContext['enabled']) {
@@ -203,6 +253,33 @@ class Compu_Stage_Resolve_Map {
       }
       // [/COMPUSTAR][ADD]
 
+      // [COMPUSTAR][ADD] Mantener el margen calculado en línea antes de escribir la fila
+      if ($inlineMarginForResolved !== null) {
+        $decoded['margin_pct'] = $inlineMarginForResolved;
+        if ($inlineMarginUsedDefault && !isset($decoded['margin_default'])) {
+          $decoded['margin_default'] = true;
+        } elseif (!$inlineMarginUsedDefault && isset($decoded['margin_default'])) {
+          unset($decoded['margin_default']);
+        }
+
+        if (isset($compuMarginContext) && is_array($compuMarginContext) && !empty($compuMarginContext['enabled'])) {
+          $skuInlinePersist = $this->stringValue($decoded['SKU'] ?? ($decoded['sku'] ?? ''));
+          if ($skuInlinePersist !== '') {
+            $upperInlinePersist = strtoupper($skuInlinePersist);
+            if (!isset($compuMarginContext['updates'][$upperInlinePersist]) || !is_array($compuMarginContext['updates'][$upperInlinePersist])) {
+              $compuMarginContext['updates'][$upperInlinePersist] = [];
+            }
+            $compuMarginContext['updates'][$upperInlinePersist]['margin_pct'] = $decoded['margin_pct'];
+            if ($inlineMarginUsedDefault) {
+              $compuMarginContext['updates'][$upperInlinePersist]['margin_default'] = true;
+            } elseif (isset($compuMarginContext['updates'][$upperInlinePersist]['margin_default'])) {
+              unset($compuMarginContext['updates'][$upperInlinePersist]['margin_default']);
+            }
+          }
+        }
+      }
+      // [/COMPUSTAR][ADD]
+
       if (!isset($statusCounts[$status])) {
         $statusCounts[$status] = 0;
       }
@@ -222,6 +299,10 @@ class Compu_Stage_Resolve_Map {
 
     fclose($inputHandle);
     fclose($outputHandle);
+
+    // [COMPUSTAR][ADD] Preservar métricas de margen inline para resumen y métricas
+    $compuInlineMarginMetrics = $metrics;
+    // [/COMPUSTAR][ADD]
 
     // [COMPUSTAR][ADD] Fusionar margen en validated.jsonl
     if ($compuMarginContext['enabled'] && !empty($compuMarginContext['updates'])) {
@@ -245,6 +326,15 @@ class Compu_Stage_Resolve_Map {
     }
     // [/COMPUSTAR][ADD]
 
+    // [COMPUSTAR][ADD] Resumen con métricas de margen inline
+    if (isset($compuInlineMarginMetrics['margin_inline_assigned'])) {
+      $summary['margin_inline_assigned'] = (int) $compuInlineMarginMetrics['margin_inline_assigned'];
+    }
+    if (isset($compuInlineMarginMetrics['margin_inline_default'])) {
+      $summary['margin_inline_default'] = (int) $compuInlineMarginMetrics['margin_inline_default'];
+    }
+    // [/COMPUSTAR][ADD]
+
     $this->log($logHandle, 'info', 'Resumen Stage 04', $summary);
     fclose($logHandle);
 
@@ -256,6 +346,15 @@ class Compu_Stage_Resolve_Map {
     if (isset($compuStage04MarginDbState) && !empty($compuStage04MarginDbState['enabled'])) {
       $metrics['margin_found'] = (int) $compuStage04MarginDbState['found'];
       $metrics['margin_default'] = (int) $compuStage04MarginDbState['default'];
+    }
+    // [/COMPUSTAR][ADD]
+
+    // [COMPUSTAR][ADD] Métricas inline en stage-04.metrics.json
+    if (isset($compuInlineMarginMetrics['margin_inline_assigned'])) {
+      $metrics['margin_inline_assigned'] = (int) $compuInlineMarginMetrics['margin_inline_assigned'];
+    }
+    if (isset($compuInlineMarginMetrics['margin_inline_default'])) {
+      $metrics['margin_inline_default'] = (int) $compuInlineMarginMetrics['margin_inline_default'];
     }
     // [/COMPUSTAR][ADD]
 
@@ -879,3 +978,41 @@ class Compu_Stage_Resolve_Map {
     throw new \RuntimeException($message);
   }
 }
+
+// [COMPUSTAR][ADD] resolver margen con cache + fallbacks (lee 'margin' o 'margin_pct')
+function compu_inline_get_margin_pct($wpdb, $term_id = null, $vendor_l3_id = null) {
+  static $cache_term = [];
+  static $cache_l3   = [];
+  $DEFAULT = 0.1500;
+
+  if ($term_id && isset($cache_term[$term_id])) return $cache_term[$term_id];
+  if ($vendor_l3_id && isset($cache_l3[$vendor_l3_id])) return $cache_l3[$vendor_l3_id];
+
+  $m = null;
+
+  // Vista preferida
+  if ($term_id) {
+    $sql = "SELECT COALESCE(margin, margin_pct) AS m FROM wp_compu_cats_map WHERE term_id = %d LIMIT 1";
+    $m = $wpdb->get_var($wpdb->prepare($sql, $term_id));
+  }
+  if ($m === null && $vendor_l3_id) {
+    $sql = "SELECT COALESCE(margin, margin_pct) AS m FROM wp_compu_cats_map WHERE vendor_l3_id = %d LIMIT 1";
+    $m = $wpdb->get_var($wpdb->prepare($sql, $vendor_l3_id));
+  }
+
+  // Fallback a tabla
+  if ($m === null && $term_id) {
+    $sql = "SELECT margin_pct AS m FROM compu_cats_map WHERE term_id = %d LIMIT 1";
+    $m = $wpdb->get_var($wpdb->prepare($sql, $term_id));
+  }
+  if ($m === null && $vendor_l3_id) {
+    $sql = "SELECT margin_pct AS m FROM compu_cats_map WHERE vendor_l3_id = %d LIMIT 1";
+    $m = $wpdb->get_var($wpdb->prepare($sql, $vendor_l3_id));
+  }
+
+  $m = ($m === null) ? $DEFAULT : max(0.0, min(1.0, (float) $m));
+  if ($term_id)      $cache_term[$term_id]     = $m;
+  if ($vendor_l3_id) $cache_l3[$vendor_l3_id]  = $m;
+  return $m;
+}
+// [/COMPUSTAR][ADD]
