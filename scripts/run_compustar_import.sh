@@ -433,8 +433,12 @@ run_optional_stage "08-offers" "08-offers.php" "$WP_CLI" "--path=$WP_PATH" "--no
 run_optional_stage "09-pricing" "09-pricing.php" "$WP_CLI" "--path=$WP_PATH" "--no-color" eval-file
 
   local stage10_script
-  stage10_script="$REPO/python/stage10_import.py"
-  [[ -f "$stage10_script" ]] || die "No se encontró stage10_import.py"
+  if [[ "${ST10_V2:-0}" == "1" ]]; then
+    stage10_script="$REPO/python/stage10_v2.py"
+  else
+    stage10_script="$REPO/python/stage10_import.py"
+  fi
+  [[ -f "$stage10_script" ]] || die "No se encontró stage10 (ruta: $stage10_script)"
   run_stage "10-import" "$PYTHON_BIN" "$stage10_script" \
     --run-dir "$RUN_DIR" \
     --input "$RUN_DIR/resolved.jsonl" \
