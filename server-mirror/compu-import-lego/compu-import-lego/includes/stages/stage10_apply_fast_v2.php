@@ -200,7 +200,7 @@ function compu_stage10_v2_create_product(array $payload, string $sku, array &$ac
 }
 
 try {
-    $payload = compu_stage10_v2_read_payload($argv);
+    $payload = compu_stage10_v2_read_payload($args);
 } catch (InvalidArgumentException $ex) {
     $errors[] = 'invalid_payload:' . $ex->getMessage();
     fwrite(STDERR, '[stage10_v2] payload error: ' . $ex->getMessage() . PHP_EOL);
@@ -221,8 +221,20 @@ require_once ABSPATH . 'wp-admin/includes/media.php';
 require_once ABSPATH . 'wp-admin/includes/image.php';
 require_once ABSPATH . 'wp-admin/includes/file.php';
 
-$categoryTerm = compu_stage10_v2_extract_int($payload['category_term'] ?? 0);
-if ($categoryTerm <= 0) {
+// === Unify category term id from payload aliases ===
+$termId = 0;
+foreach (['term_id','woo_term_id','category_term_id','category_id','category_term'] as $k) {
+    if (isset($payload[$k])) {
+        $v = compu_stage10_v2_extract_int($payload[$k]);
+        if ($v > 0) { $termId = $v; break; }
+    }
+}
+// Legacy alias para cualquier código que aún lea $categoryTerm
+$categoryTerm = $termId;
+
+// Gate solo si REQUIRE_TERM=1
+$requireTerm = compu_stage10_v2_flag_enabled('REQUIRE_TERM', false);
+if ($requireTerm && $termId <= 0) {
     $skipped[] = 'skipped_no_cat';
     compu_stage10_v2_output($result);
 }
@@ -247,7 +259,9 @@ if ($productId <= 0 && $result['sku'] !== '') {
 }
 
 if ($productId <= 0) {
-    if (!compu_stage10_v2_flag_enabled('ST10_ALLOW_CREATE', false)) {
+    $allowCreate = compu_stage10_v2_flag_enabled('ST10_ALLOW_CREATE', false)
+                || compu_stage10_v2_flag_enabled('ALLOW_CREATE', false);
+    if (!$allowCreate) {
         $skipped[] = 'missing_product';
         compu_stage10_v2_output($result);
     }
@@ -259,7 +273,7 @@ if ($productId <= 0) {
 
 $result['id'] = $productId;
 
-compu_stage10_v2_assign_category($productId, $categoryTerm, $actions, $skipped, $errors);
+compu_stage10_v2_assign_category($productId, $termId, $actions, $skipped, $errors);
 compu_stage10_v2_set_stock($productId, $payload, $actions);
 compu_stage10_v2_apply_price($productId, $price, $salePrice, $actions, $skipped);
 compu_stage10_v2_set_audit_meta($productId, $payload, $actions);
