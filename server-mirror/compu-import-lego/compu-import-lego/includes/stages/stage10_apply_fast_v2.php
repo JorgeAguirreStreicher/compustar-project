@@ -91,6 +91,96 @@ function compu_stage10_v2_extract_int($value): int
     return (int) round((float) $value);
 }
 
+function compu_stage10_v2_set_image_from_url(int $productId, ?string $url, array &$actions, array &$skipped, array &$errors): void {
+    $url = trim((string)($url ?? ''));
+    if ($url === '') { return; }
+    require_once ABSPATH . 'wp-admin/includes/media.php';
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/image.php';
+
+    $tmp = download_url($url);
+    if (is_wp_error($tmp)) { $skipped[] = 'image_download_failed'; return; }
+
+    $filename = basename(parse_url($url, PHP_URL_PATH) ?: 'image.jpg');
+    $file = ['name' => $filename, 'tmp_name' => $tmp];
+    $id = media_handle_sideload($file, $productId);
+    if (is_wp_error($id)) {
+        @unlink($tmp);
+        $skipped[] = 'image_attach_failed';
+        return;
+    }
+    set_post_thumbnail($productId, $id);
+    $actions[] = 'image_set';
+}
+
+function compu_stage10_v2_assign_brand(int $productId, ?string $brand, array &$actions, array &$skipped): void {
+    $brand = trim((string)($brand ?? ''));
+    if ($brand === '') { return; }
+    $tax = taxonomy_exists('product_brand') ? 'product_brand'
+        : (taxonomy_exists('pwb-brand') ? 'pwb-brand'
+        : (taxonomy_exists('yith_product_brand') ? 'yith_product_brand' : null));
+    if (!$tax) { $skipped[] = 'brand_tax_missing'; return; }
+    wp_set_object_terms($productId, [$brand], $tax, false);
+    $actions[] = 'brand_assigned';
+}
+
+function compu_stage10_v2_calc_price_mxn_vat(array $payload): float {
+    $price = (float)($payload['price'] ?? 0);
+    if ($price > 0) { return round($price, 2); }
+
+    $tc   = (float)($payload['Tipo_de_Cambio'] ?? 1);
+    $base = (float)($payload['Su_Precio'] ?? 0);
+    if ($base <= 0) {
+        $base = (float)($payload['Precio_Especial'] ?? ($payload['Precio_Lista'] ?? 0));
+    }
+    if ($base <= 0) { return 0.0; }
+    $mxn = $tc > 0 ? ($base * $tc) : $base;
+    $mxn_iva = $mxn * 1.16; // IVA 16%
+    return round($mxn_iva, 2);
+}
+
+function compu_stage10_v2_upsert_offer(int $productId, array $payload, array &$actions, array &$errors): void {
+    global $wpdb;
+    $table = $wpdb->prefix . 'compu_offers';
+
+    $supplier = strtolower(trim((string)($payload['supplier'] ?? 'syscom')));
+    $supplierSku = (string)($payload['supplier_sku'] ?? ($payload['sku'] ?? ''));
+    $exchange = (float)($payload['Tipo_de_Cambio'] ?? 1);
+    $cost = (float)($payload['Su_Precio'] ?? 0);
+    if ($cost <= 0) {
+        $cost = (float)($payload['Precio_Especial'] ?? ($payload['Precio_Lista'] ?? 0));
+    }
+    $cost_mxn = $exchange > 0 ? ($cost * $exchange) : $cost;
+    $cost_vat = $cost_mxn * 1.16;
+    $stock = (int)($payload['Stock_Suma_Total'] ?? ($payload['Stock_Suma_Sin_Tijuana'] ?? ($payload['stock'] ?? 0)));
+    $warehouse = isset($payload['warehouse_code']) ? (string)$payload['warehouse_code'] : null;
+
+    $data = [
+        'product_id'       => $productId,
+        'supplier'         => $supplier,
+        'supplier_sku'     => $supplierSku,
+        'source'           => (string)($payload['source'] ?? 'stage10_fast_v2'),
+        'exchange_rate'    => $exchange,
+        'price_cost'       => $cost,
+        'price_cost_mxn'   => $cost_mxn,
+        'price_cost_vat'   => $cost_vat,
+        'stock'            => $stock,
+        'last_synced_at'   => current_time('mysql', true),
+        'warehouse_code'   => $warehouse,
+        'is_new'           => 1,
+        'is_refurb'        => 0,
+        'is_bundle'        => 0,
+    ];
+    $fmt = ['%d','%s','%s','%s','%f','%f','%f','%d','%s','%s','%d','%d','%d'];
+
+    $ok = $wpdb->replace($table, $data, $fmt);
+    if ($ok === false) {
+        $errors[] = 'offer_upsert_failed:' . $wpdb->last_error;
+    } else {
+        $actions[] = 'offer_upserted';
+    }
+}
+
 function compu_stage10_v2_pick_title(array $payload, string $fallback): string
 {
     foreach (['name', 'title', 'Nombre', 'post_title'] as $key) {
@@ -227,7 +317,21 @@ if ($categoryTerm <= 0) {
     compu_stage10_v2_output($result);
 }
 
-$price = compu_stage10_v2_extract_float($payload['price'] ?? null);
+$productId = compu_stage10_v2_extract_int($payload['product_id'] ?? ($payload['id'] ?? 0));
+if ($productId <= 0 && $result['sku'] !== '') {
+    $productId = (int) wc_get_product_id_by_sku($result['sku']);
+}
+
+// Mapear stock desde sumatorias de Syscom y forzar manage_stock
+$payload['stock'] = (int)($payload['Stock_Suma_Total'] ?? ($payload['Stock_Suma_Sin_Tijuana'] ?? 0));
+$payload['manage_stock'] = true;
+// Peso en kg a meta nativa
+if (!empty($payload['Peso_Kg']) && $productId > 0) {
+    update_post_meta($productId, '_weight', (string)compu_stage10_v2_extract_float($payload['Peso_Kg']));
+    $actions[] = 'weight_set';
+}
+
+$price = compu_stage10_v2_calc_price_mxn_vat($payload);
 if (compu_stage10_v2_flag_enabled('ST10_GUARD_PRICE_ZERO', true) && $price <= 0.0) {
     $skipped[] = 'price_zero_guard';
     compu_stage10_v2_output($result);
@@ -239,11 +343,6 @@ if (array_key_exists('sale_price', $payload)) {
     if ($saleCandidate > 0) {
         $salePrice = $saleCandidate;
     }
-}
-
-$productId = compu_stage10_v2_extract_int($payload['product_id'] ?? ($payload['id'] ?? 0));
-if ($productId <= 0 && $result['sku'] !== '') {
-    $productId = (int) wc_get_product_id_by_sku($result['sku']);
 }
 
 if ($productId <= 0) {
@@ -259,10 +358,22 @@ if ($productId <= 0) {
 
 $result['id'] = $productId;
 
+if (!empty($payload['Peso_Kg'])) {
+    update_post_meta($productId, '_weight', (string)compu_stage10_v2_extract_float($payload['Peso_Kg']));
+    if (!in_array('weight_set', $actions, true)) {
+        $actions[] = 'weight_set';
+    }
+}
+
+compu_stage10_v2_assign_brand($productId, ($payload['Marca'] ?? $payload['brand'] ?? null), $actions, $skipped);
+
 compu_stage10_v2_assign_category($productId, $categoryTerm, $actions, $skipped, $errors);
 compu_stage10_v2_set_stock($productId, $payload, $actions);
+$img = $payload['Imagen_Principal'] ?? ($payload['image_url'] ?? '');
+compu_stage10_v2_set_image_from_url($productId, $img, $actions, $skipped, $errors);
 compu_stage10_v2_apply_price($productId, $price, $salePrice, $actions, $skipped);
 compu_stage10_v2_set_audit_meta($productId, $payload, $actions);
+compu_stage10_v2_upsert_offer($productId, $payload, $actions, $errors);
 
 $currentStatus = get_post_status($productId) ?: 'draft';
 if ($currentStatus !== 'publish') {
