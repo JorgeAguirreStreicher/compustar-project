@@ -1,4 +1,30 @@
 <?php
+
+/** Parseo robusto de CSV sobre línea cruda */
+function compu_csv_parse_line($raw) {
+  $converted = iconv('UTF-8', 'UTF-8//IGNORE', $raw);
+  if ($converted !== false) {
+    $raw = $converted;
+  }
+
+  $row = str_getcsv($raw, ',', '"', '\\');
+
+  if (is_array($row) && count($row) === 1 && substr_count($raw, ',') >= 3) {
+    $raw2 = str_replace('\\"', '""', $raw);
+    $row  = str_getcsv($raw2, ',', '"', '\\');
+  }
+
+  return $row;
+}
+
+/** Limpieza por campo (no sobre la línea completa) */
+function compu_field_sanitize($v) {
+  if (!is_string($v)) {
+    return $v;
+  }
+  $v = preg_replace('/\s+/u', ' ', trim($v));
+  return $v;
+}
 if (!defined('ABSPATH')) {
   exit;
 }
@@ -19,22 +45,30 @@ class Compu_Stage_Normalize {
       $this->cli_error("Falta source.csv en {$runDir}. Ejecuta fetch primero.");
     }
 
-    $delimiter = $this->detectDelimiter($source);
-    $handle    = fopen($source, 'r');
+    $handle = fopen($source, 'r');
     if ($handle === false) {
       $this->cli_error('No se pudo abrir source.csv para lectura.');
     }
 
-    $headerRaw = fgetcsv($handle, 0, $delimiter, '"', '\\');
-    if ($headerRaw === false) {
+    $headerLine = fgets($handle);
+    if ($headerLine === false) {
       fclose($handle);
       $this->cli_error('El CSV no contiene encabezados.');
     }
+
+    $headerRaw = compu_csv_parse_line($headerLine);
+    if (!is_array($headerRaw) || count($headerRaw) === 0) {
+      fclose($handle);
+      $this->cli_error('El CSV no contiene encabezados válidos.');
+    }
+
+    $headerRaw = array_map('compu_field_sanitize', $headerRaw);
 
     $headerMeta     = $this->buildHeaderMeta($headerRaw);
     $modeloIndex    = $this->findModeloIndex($headerMeta);
     $headerMeta     = $this->ensureSkuColumn($headerMeta, $modeloIndex);
     $normalizedHead = $this->finalizeHeaderNames($headerMeta);
+    $headerCount    = count($headerRaw);
 
     // Codex audit: persistimos el mapa de encabezados para las auditorías 01-03.
     $this->persistHeaderMap(
@@ -59,8 +93,26 @@ class Compu_Stage_Normalize {
 
     fputcsv($csvHandle, $normalizedHead, ',', '"', '\\');
 
-    while (($row = fgetcsv($handle, 0, $delimiter, '"', '\\')) !== false) {
+    while (($rawLine = fgets($handle)) !== false) {
+      $row = compu_csv_parse_line($rawLine);
+      if (!is_array($row) || count($row) === 0) {
+        continue;
+      }
+
+      $row = array_map('compu_field_sanitize', $row);
+
+      if (count($row) > $headerCount) {
+        $row = array_slice($row, 0, $headerCount);
+      } elseif (count($row) < $headerCount) {
+        $row = array_pad($row, $headerCount, '');
+      }
+
       if ($this->isEmptyRow($row)) {
+        continue;
+      }
+
+      $assocRow = array_combine($headerRaw, $row);
+      if ($assocRow === false) {
         continue;
       }
 
