@@ -91,94 +91,152 @@ function compu_stage10_v2_extract_int($value): int
     return (int) round((float) $value);
 }
 
-function compu_stage10_v2_set_image_from_url(int $productId, ?string $url, array &$actions, array &$skipped, array &$errors): void {
-    $url = trim((string)($url ?? ''));
-    if ($url === '') { return; }
+function compu_stage10_v2_set_image_from_url(int $productId, string $url, array &$actions, array &$errors): void {
+    $url = trim($url);
+    if ($url === '') {
+        return;
+    }
+
     require_once ABSPATH . 'wp-admin/includes/media.php';
     require_once ABSPATH . 'wp-admin/includes/file.php';
     require_once ABSPATH . 'wp-admin/includes/image.php';
 
     $tmp = download_url($url);
-    if (is_wp_error($tmp)) { $skipped[] = 'image_download_failed'; return; }
-
-    $filename = basename(parse_url($url, PHP_URL_PATH) ?: 'image.jpg');
-    $file = ['name' => $filename, 'tmp_name' => $tmp];
-    $id = media_handle_sideload($file, $productId);
-    if (is_wp_error($id)) {
-        @unlink($tmp);
-        $skipped[] = 'image_attach_failed';
+    if (is_wp_error($tmp)) {
+        $errors[] = 'image_download_failed';
         return;
     }
-    set_post_thumbnail($productId, $id);
+
+    $path = parse_url($url, PHP_URL_PATH);
+    $filename = $path ? basename($path) : 'image.jpg';
+    if ($filename === '' || $filename === '.' || $filename === '..') {
+        $filename = 'image.jpg';
+    }
+
+    $file = [
+        'name' => $filename,
+        'tmp_name' => $tmp,
+    ];
+
+    $attachmentId = media_handle_sideload($file, $productId);
+    if (is_wp_error($attachmentId)) {
+        @unlink($tmp);
+        $errors[] = 'image_attach_failed';
+        return;
+    }
+
+    set_post_thumbnail($productId, $attachmentId);
     $actions[] = 'image_set';
 }
 
-function compu_stage10_v2_assign_brand(int $productId, ?string $brand, array &$actions, array &$skipped): void {
-    $brand = trim((string)($brand ?? ''));
-    if ($brand === '') { return; }
-    $tax = taxonomy_exists('product_brand') ? 'product_brand'
-        : (taxonomy_exists('pwb-brand') ? 'pwb-brand'
-        : (taxonomy_exists('yith_product_brand') ? 'yith_product_brand' : null));
-    if (!$tax) { $skipped[] = 'brand_tax_missing'; return; }
-    wp_set_object_terms($productId, [$brand], $tax, false);
+function compu_stage10_v2_assign_brand(int $productId, string $brandName, array &$actions, array &$skipped, array &$errors): void {
+    $brandName = trim($brandName);
+    if ($brandName === '') {
+        return;
+    }
+
+    $taxonomy = null;
+    foreach (['product_brand', 'pwb-brand', 'yith_product_brand'] as $candidate) {
+        if (taxonomy_exists($candidate)) {
+            $taxonomy = $candidate;
+            break;
+        }
+    }
+
+    if ($taxonomy === null) {
+        $skipped[] = 'brand_tax_missing';
+        return;
+    }
+
+    $term = term_exists($brandName, $taxonomy);
+    if (!$term) {
+        $created = wp_insert_term($brandName, $taxonomy);
+        if (is_wp_error($created)) {
+            $errors[] = 'brand_assign_failed:' . $created->get_error_code();
+            return;
+        }
+        $termId = (int) $created['term_id'];
+    } else {
+        $termId = (int) (is_array($term) ? $term['term_id'] : $term);
+    }
+
+    $assigned = wp_set_object_terms($productId, [$termId], $taxonomy, false);
+    if (is_wp_error($assigned)) {
+        $errors[] = 'brand_assign_failed:' . $assigned->get_error_code();
+        return;
+    }
+
     $actions[] = 'brand_assigned';
 }
 
-function compu_stage10_v2_calc_price_mxn_vat(array $payload): float {
-    $price = (float)($payload['price'] ?? 0);
-    if ($price > 0) { return round($price, 2); }
-
-    $tc   = (float)($payload['Tipo_de_Cambio'] ?? 1);
-    $base = (float)($payload['Su_Precio'] ?? 0);
-    if ($base <= 0) {
-        $base = (float)($payload['Precio_Especial'] ?? ($payload['Precio_Lista'] ?? 0));
+function compu_stage10_v2_calc_price_mxn_vat(array $payload): array {
+    $baseUsd = compu_stage10_v2_extract_float($payload['Su_Precio'] ?? null);
+    if ($baseUsd <= 0) {
+        $baseUsd = compu_stage10_v2_extract_float($payload['Precio_Especial'] ?? null);
     }
-    if ($base <= 0) { return 0.0; }
-    $mxn = $tc > 0 ? ($base * $tc) : $base;
-    $mxn_iva = $mxn * 1.16; // IVA 16%
-    return round($mxn_iva, 2);
+    if ($baseUsd <= 0) {
+        $baseUsd = compu_stage10_v2_extract_float($payload['Precio_Lista'] ?? null);
+    }
+
+    $tc = compu_stage10_v2_extract_float($payload['Tipo_de_Cambio'] ?? null);
+    if ($tc <= 0) {
+        $tc = 1.0;
+    }
+
+    $priceMxn = $baseUsd * $tc;
+    $priceMxnVat = round($priceMxn * 1.16, 2);
+
+    return [
+        'base_usd' => $baseUsd,
+        'tc' => $tc,
+        'mxn' => $priceMxn,
+        'mxn_vat' => $priceMxnVat,
+    ];
 }
 
-function compu_stage10_v2_upsert_offer(int $productId, array $payload, array &$actions, array &$errors): void {
+function compu_stage10_v2_upsert_offer(int $productId, array $payload, array $priceData, int $stock, array &$actions, array &$errors): void {
     global $wpdb;
     $table = $wpdb->prefix . 'compu_offers';
 
-    $supplier = strtolower(trim((string)($payload['supplier'] ?? 'syscom')));
-    $supplierSku = (string)($payload['supplier_sku'] ?? ($payload['sku'] ?? ''));
-    $exchange = (float)($payload['Tipo_de_Cambio'] ?? 1);
-    $cost = (float)($payload['Su_Precio'] ?? 0);
-    if ($cost <= 0) {
-        $cost = (float)($payload['Precio_Especial'] ?? ($payload['Precio_Lista'] ?? 0));
+    $supplierRaw = $payload['supplier'] ?? null;
+    $supplier = trim((string) ($supplierRaw ?? ''));
+    if ($supplier === '') {
+        $supplier = 'syscom';
     }
-    $cost_mxn = $exchange > 0 ? ($cost * $exchange) : $cost;
-    $cost_vat = $cost_mxn * 1.16;
-    $stock = (int)($payload['Stock_Suma_Total'] ?? ($payload['Stock_Suma_Sin_Tijuana'] ?? ($payload['stock'] ?? 0)));
-    $warehouse = isset($payload['warehouse_code']) ? (string)$payload['warehouse_code'] : null;
+
+    $supplierSku = trim((string) ($payload['sku'] ?? ($payload['Modelo'] ?? '')));
+
+    $warehouse = isset($payload['warehouse_code']) ? trim((string) $payload['warehouse_code']) : '';
+    if ($warehouse === '') {
+        $warehouse = 'NA';
+    }
 
     $data = [
-        'product_id'       => $productId,
-        'supplier'         => $supplier,
-        'supplier_sku'     => $supplierSku,
-        'source'           => (string)($payload['source'] ?? 'stage10_fast_v2'),
-        'exchange_rate'    => $exchange,
-        'price_cost'       => $cost,
-        'price_cost_mxn'   => $cost_mxn,
-        'price_cost_vat'   => $cost_vat,
-        'stock'            => $stock,
-        'last_synced_at'   => current_time('mysql', true),
-        'warehouse_code'   => $warehouse,
-        'is_new'           => 1,
-        'is_refurb'        => 0,
-        'is_bundle'        => 0,
+        'product_id' => $productId,
+        'supplier' => $supplier,
+        'supplier_sku' => $supplierSku,
+        'source' => 'stage10_v2',
+        'exchange_rate' => $priceData['tc'],
+        'price_cost' => $priceData['base_usd'],
+        'price_cost_mxn' => $priceData['mxn'],
+        'price_cost_vat' => $priceData['mxn_vat'],
+        'stock' => $stock,
+        'last_synced_at' => current_time('mysql', true),
+        'warehouse_code' => $warehouse,
+        'is_new' => 1,
+        'is_refurb' => 0,
+        'is_bundle' => 0,
     ];
-    $fmt = ['%d','%s','%s','%s','%f','%f','%f','%d','%s','%s','%d','%d','%d'];
 
-    $ok = $wpdb->replace($table, $data, $fmt);
-    if ($ok === false) {
+    $formats = ['%d', '%s', '%s', '%s', '%f', '%f', '%f', '%f', '%d', '%s', '%s', '%d', '%d', '%d'];
+
+    $result = $wpdb->replace($table, $data, $formats);
+    if ($result === false) {
         $errors[] = 'offer_upsert_failed:' . $wpdb->last_error;
-    } else {
-        $actions[] = 'offer_upserted';
+        return;
     }
+
+    $actions[] = 'offer_upserted';
 }
 
 function compu_stage10_v2_pick_title(array $payload, string $fallback): string
@@ -218,24 +276,26 @@ function compu_stage10_v2_assign_category(int $productId, int $termId, array &$a
     $actions[] = 'cat_assigned';
 }
 
-function compu_stage10_v2_set_stock(int $productId, array $payload, array &$actions): void
+function compu_stage10_v2_set_stock(int $productId, array $payload, array &$actions): int
 {
-    $stock = compu_stage10_v2_extract_int($payload['stock'] ?? 0);
-    $status = isset($payload['stock_status']) ? strtolower((string) $payload['stock_status']) : '';
-    if ($status !== 'instock' && $status !== 'outofstock') {
-        $status = $stock > 0 ? 'instock' : 'outofstock';
+    $stock = compu_stage10_v2_extract_int($payload['Stock_Suma_Total'] ?? ($payload['Stock_Suma_Sin_Tijuana'] ?? ($payload['stock'] ?? 0)));
+    if ($stock < 0) {
+        $stock = 0;
     }
-    $manage = compu_stage10_v2_truthy($payload['manage_stock'] ?? null);
-    $manage = $manage !== false;
 
-    update_post_meta($productId, '_manage_stock', $manage ? 'yes' : 'no');
-    update_post_meta($productId, '_stock', (string) max(0, $stock));
+    $status = $stock > 0 ? 'instock' : 'outofstock';
+
+    update_post_meta($productId, '_manage_stock', 'yes');
+    update_post_meta($productId, '_stock', (string) $stock);
     update_post_meta($productId, '_stock_status', $status);
     update_post_meta($productId, '_backorders', 'no');
     if (function_exists('wc_update_product_stock_status')) {
         wc_update_product_stock_status($productId, $status);
     }
+
     $actions[] = 'stock_set';
+
+    return $stock;
 }
 
 function compu_stage10_v2_apply_price(int $productId, float $price, ?float $salePrice, array &$actions, array &$skipped): void
@@ -322,17 +382,8 @@ if ($productId <= 0 && $result['sku'] !== '') {
     $productId = (int) wc_get_product_id_by_sku($result['sku']);
 }
 
-// Mapear stock desde sumatorias de Syscom y forzar manage_stock
-$payload['stock'] = (int)($payload['Stock_Suma_Total'] ?? ($payload['Stock_Suma_Sin_Tijuana'] ?? 0));
-$payload['manage_stock'] = true;
-// Peso en kg a meta nativa
-if (!empty($payload['Peso_Kg']) && $productId > 0) {
-    update_post_meta($productId, '_weight', (string)compu_stage10_v2_extract_float($payload['Peso_Kg']));
-    $actions[] = 'weight_set';
-}
-
-$price = compu_stage10_v2_calc_price_mxn_vat($payload);
-if (compu_stage10_v2_flag_enabled('ST10_GUARD_PRICE_ZERO', true) && $price <= 0.0) {
+$priceData = compu_stage10_v2_calc_price_mxn_vat($payload);
+if (compu_stage10_v2_flag_enabled('ST10_GUARD_PRICE_ZERO', true) && $priceData['base_usd'] <= 0.0) {
     $skipped[] = 'price_zero_guard';
     compu_stage10_v2_output($result);
 }
@@ -358,22 +409,28 @@ if ($productId <= 0) {
 
 $result['id'] = $productId;
 
-if (!empty($payload['Peso_Kg'])) {
-    update_post_meta($productId, '_weight', (string)compu_stage10_v2_extract_float($payload['Peso_Kg']));
-    if (!in_array('weight_set', $actions, true)) {
-        $actions[] = 'weight_set';
+compu_stage10_v2_assign_category($productId, $categoryTerm, $actions, $skipped, $errors);
+$stockApplied = compu_stage10_v2_set_stock($productId, $payload, $actions);
+compu_stage10_v2_apply_price($productId, $priceData['mxn_vat'], $salePrice, $actions, $skipped);
+
+if (array_key_exists('Peso_Kg', $payload)) {
+    $weight = compu_stage10_v2_extract_float($payload['Peso_Kg']);
+    if ($weight >= 0) {
+        update_post_meta($productId, '_weight', (string) $weight);
+        if (!in_array('weight_set', $actions, true)) {
+            $actions[] = 'weight_set';
+        }
     }
 }
 
-compu_stage10_v2_assign_brand($productId, ($payload['Marca'] ?? $payload['brand'] ?? null), $actions, $skipped);
+$brandName = (string) ($payload['Marca'] ?? ($payload['brand'] ?? ($payload['Brand'] ?? '')));
+compu_stage10_v2_assign_brand($productId, $brandName, $actions, $skipped, $errors);
 
-compu_stage10_v2_assign_category($productId, $categoryTerm, $actions, $skipped, $errors);
-compu_stage10_v2_set_stock($productId, $payload, $actions);
-$img = $payload['Imagen_Principal'] ?? ($payload['image_url'] ?? '');
-compu_stage10_v2_set_image_from_url($productId, $img, $actions, $skipped, $errors);
-compu_stage10_v2_apply_price($productId, $price, $salePrice, $actions, $skipped);
+$imageUrl = (string) ($payload['Imagen_Principal'] ?? ($payload['image_url'] ?? ''));
+compu_stage10_v2_set_image_from_url($productId, $imageUrl, $actions, $errors);
+
 compu_stage10_v2_set_audit_meta($productId, $payload, $actions);
-compu_stage10_v2_upsert_offer($productId, $payload, $actions, $errors);
+compu_stage10_v2_upsert_offer($productId, $payload, $priceData, $stockApplied, $actions, $errors);
 
 $currentStatus = get_post_status($productId) ?: 'draft';
 if ($currentStatus !== 'publish') {
