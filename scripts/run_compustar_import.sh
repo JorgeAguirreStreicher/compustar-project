@@ -274,17 +274,68 @@ run_optional_stage() {
   run_stage "$label" "$@" "$script_path"
 }
 
+verify_stage10_results() {
+  if [[ "$DRY_RUN" == "1" ]]; then
+    log "Stage10 en modo dry-run; omitiendo verificación de escrituras"
+    return
+  fi
+
+  if [[ -z "$RUN_ID" ]]; then
+    die "RUN_ID no definido para verificación de Stage10"
+  fi
+
+  log "== Verificando escrituras de Stage10 para RUN_ID=$RUN_ID =="
+
+  local offers_sql
+  printf -v offers_sql 'SELECT COUNT(*) AS offers_rows FROM wp_compu_offers WHERE run_id = "%s";' "$RUN_ID"
+  log "$offers_sql"
+  local offers_output
+  if ! offers_output=$("$WP_CLI" "--path=$WP_PATH" "--no-color" db query "$offers_sql" --skip-column-names 2>&1); then
+    log "$offers_output"
+    die "Fallo al ejecutar verificación de ofertas en Stage10"
+  fi
+  offers_output=$(echo "$offers_output" | tr -d '\r')
+  log "Resultado offers_rows: $offers_output"
+  local offers_count
+  offers_count=$(echo "$offers_output" | awk 'NR==1 {print $1}' | tr -d '[:space:]')
+  if [[ -z "$offers_count" || ! "$offers_count" =~ ^[0-9]+$ ]]; then
+    die "No se pudo determinar offers_rows para RUN_ID=$RUN_ID"
+  fi
+  if (( offers_count <= 0 )); then
+    die "Stage10 no generó filas en wp_compu_offers para RUN_ID=$RUN_ID"
+  fi
+
+  local prices_sql
+  printf -v prices_sql 'SELECT COUNT(*) AS woo_price_set FROM wp_postmeta WHERE meta_key IN ("_price","_regular_price") AND post_id IN (SELECT post_id FROM wp_compu_products WHERE last_run_id = "%s");' "$RUN_ID"
+  log "$prices_sql"
+  local prices_output
+  if ! prices_output=$("$WP_CLI" "--path=$WP_PATH" "--no-color" db query "$prices_sql" --skip-column-names 2>&1); then
+    log "$prices_output"
+    die "Fallo al ejecutar verificación de precios en Stage10"
+  fi
+  prices_output=$(echo "$prices_output" | tr -d '\r')
+  log "Resultado woo_price_set: $prices_output"
+  local prices_count
+  prices_count=$(echo "$prices_output" | awk 'NR==1 {print $1}' | tr -d '[:space:]')
+  if [[ -z "$prices_count" || ! "$prices_count" =~ ^[0-9]+$ ]]; then
+    die "No se pudo determinar woo_price_set para RUN_ID=$RUN_ID"
+  fi
+  if (( prices_count <= 0 )); then
+    die "Stage10 no actualizó precios en wp_postmeta para RUN_ID=$RUN_ID"
+  fi
+
+  log "Verificación de Stage10 completada: offers_rows=$offers_count, woo_price_set=$prices_count"
+}
+
 summarize_artifact() {
   local label="$1"
   local path="$2"
   if [[ -f "$path" ]]; then
-    local lines
-    if [[ "$path" == *.json || "$path" == *.jsonl ]]; then
-      lines=$(wc -l < "$path" 2>/dev/null || echo "N/A")
-    else
-      lines=$(wc -l < "$path" 2>/dev/null || echo "N/A")
+    local wc_output
+    if ! wc_output=$(wc -l "$path" 2>/dev/null); then
+      wc_output="(error al ejecutar wc -l) $path"
     fi
-    log "${label}: $path (lineas=${lines})"
+    log "$label: $wc_output"
   else
     log "${label}: NO ENCONTRADO ($path)"
   fi
@@ -302,15 +353,20 @@ summary_report() {
 
   if command -v jq >/dev/null 2>&1; then
     if [[ -f "$RUN_DIR/final/import-report.json" ]]; then
-      local flags
-      flags=$(jq -r 'if type=="object" and has("flags") then (.flags | to_entries | map("\(.key)=\(.value)") | join(", ")) else empty end' "$RUN_DIR/final/import-report.json" || true)
-      if [[ -n "$flags" ]]; then
-        log "Stage10 flags: $flags"
+      local import_summary
+      import_summary=$(jq -r 'if type=="object" and has("summary") then (.summary | to_entries | map("\(.key)=\(.value)") | join(", ")) elif type=="object" and has("totals") then (.totals | to_entries | map("\(.key)=\(.value)") | join(", ")) else empty end' "$RUN_DIR/final/import-report.json" || true)
+      if [[ -n "$import_summary" ]]; then
+        log "Import-report resumen: $import_summary"
       fi
       local dry
       dry=$(jq -r 'if type=="object" and has("dry_run") then ("dry_run=" + (if .dry_run then "yes" else "no" end)) else empty end' "$RUN_DIR/final/import-report.json" || true)
       if [[ -n "$dry" ]]; then
-        log "Stage10 reporte: $dry"
+        log "Import-report dry_run: $dry"
+      fi
+      local flags
+      flags=$(jq -r 'if type=="object" and has("flags") then (.flags | to_entries | map("\(.key)=\(.value)") | join(", ")) else empty end' "$RUN_DIR/final/import-report.json" || true)
+      if [[ -n "$flags" ]]; then
+        log "Import-report flags: $flags"
       fi
     fi
     if [[ -f "$RUN_DIR/final/postcheck.json" ]]; then
@@ -323,6 +379,7 @@ summary_report() {
   fi
 
   log "Dry-run flag: $DRY_RUN"
+  log "Run ID: $RUN_ID"
   log "Run directory: $RUN_DIR"
 }
 
@@ -429,27 +486,17 @@ run_pipeline() {
   run_stage "07-media" "$WP_CLI" "--path=$WP_PATH" "--no-color" eval-file "$stage07"
   ensure_file "$RUN_DIR/media.jsonl" "Stage 07 no generó media.jsonl"
 
-run_optional_stage "08-offers" "08-offers.php" "$WP_CLI" "--path=$WP_PATH" "--no-color" eval-file
-run_optional_stage "09-pricing" "09-pricing.php" "$WP_CLI" "--path=$WP_PATH" "--no-color" eval-file
+  run_optional_stage "08-offers" "08-offers.php" "$WP_CLI" "--path=$WP_PATH" "--no-color" eval-file
+  run_optional_stage "09-pricing" "09-pricing.php" "$WP_CLI" "--path=$WP_PATH" "--no-color" eval-file
 
   local stage10_script
-  if [[ "${ST10_V2:-0}" == "1" ]]; then
-    stage10_script="$REPO/python/stage10_v2.py"
-  else
-    stage10_script="$REPO/python/stage10_import.py"
-  fi
-  [[ -f "$stage10_script" ]] || die "No se encontró stage10 (ruta: $stage10_script)"
-  run_stage "10-import" "$PYTHON_BIN" "$stage10_script" \
-    --run-dir "$RUN_DIR" \
-    --input "$RUN_DIR/resolved.jsonl" \
-    --log "$RUN_DIR/logs/stage10.log" \
-    --report "$RUN_DIR/final/import-report.json" \
-    --dry-run "$DRY_RUN" \
-    --writer wp \
-    --wp-path "$WP_PATH" \
-    --wp-args="--no-color" \
-    --run-id "$RUN_ID"
+  stage10_script=$(resolve_stage_script "stage10_apply_fast_v2.php") || die "No se encontró stage10_apply_fast_v2.php"
+  export ST10_WRITE_OFFERS=1
+  export ST10_AUTO_ENSURE_COMPU_PRODUCT=1
+  log "Stage10 dry-run flag: $DRY_RUN"
+  run_stage "10-apply-fast" "$WP_CLI" "--path=$WP_PATH" "--no-color" eval-file "$stage10_script"
   ensure_file "$RUN_DIR/final/import-report.json" "Stage 10 no generó final/import-report.json"
+  verify_stage10_results
 
   local stage11_script
   stage11_script="$REPO/python/stage11_postcheck.py"

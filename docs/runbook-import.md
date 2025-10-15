@@ -15,7 +15,7 @@ El script `scripts/run_compustar_import.sh` ejecuta en secuencia los Stages 01 a
 | 07    | WP-CLI `eval-file`     | Gestiona media/imágenes del catálogo.                | `media.jsonl`, `media/`                   |
 | 08    | WP-CLI `eval-file`     | (Opcional) Precios/ofertas.                          | `final/offers_*` (si aplica)              |
 | 09    | WP-CLI `eval-file`     | (Opcional) Stock/actualizaciones de pricing.         | `final/pricing_*` (si aplica)             |
-| 10    | Python                 | Importa productos en WooCommerce (`writer=wp`).      | `final/import-report.json`, logs          |
+| 10    | WP-CLI `eval-file`     | Aplica `stage10_apply_fast_v2.php` (import rápido).  | `final/import-report.json`, logs          |
 | 11    | Python                 | Auditoría post-import.                               | `final/postcheck.json`                    |
 
 Todos los artefactos se generan en `wp-content/uploads/compu-import/run-<epoch>` dentro de la instalación de WordPress.
@@ -107,8 +107,8 @@ Artefactos adicionales generados por etapas intermedias: `final/unmapped.csv`, `
 ## 6. Logs y monitoreo
 
 - Master log: `$RUN_DIR/logs/master.log`
-- Logs por stage: `$RUN_DIR/logs/<stage>.log` (por ejemplo `01-fetch.log`, `stage-07.log`)
-- Logs especiales: Stage 07 escribe `stage-07.log`, Stage 10 y 11 generan sus propios logs definidos por CLI.
+- Logs por stage: `$RUN_DIR/logs/<stage>.log` (por ejemplo `01-fetch.log`, `07-media.log`, `10-apply-fast.log`, `11-postcheck.log`).
+- Logs especiales: Stage 07 continúa escribiendo `stage-07.log` y Stage 11 además genera `stage11.log` (argumento `--log`).
 
 Para ver las últimas líneas de un stage:
 ```bash
@@ -177,6 +177,23 @@ wc -l "$RUN_DIR/media.jsonl"
   - Faltan `resolved.jsonl` y `validated.jsonl` → salida `[07] No existe resolved.jsonl ni validated.jsonl`.
   - Errores de red persistentes → revisar `stage-07.log` para identificar timeouts o códigos HTTP.
 
+### Stage 10 (apply fast)
+
+- **Ruta efectiva:** `wp --path=/home/compustar/htdocs eval-file /home/compustar/htdocs/wp-content/plugins/compu-import-lego/includes/stages/stage10_apply_fast_v2.php`.
+- **Variables de entorno clave:**
+  - `RUN_DIR` / `RUN_PATH` (ubicación del run actual).
+  - `RUN_ID` (usado para etiquetar escrituras en tablas).
+  - `DRY_RUN` (`0` para escribir, `1` para solo simular).
+  - `ST10_WRITE_OFFERS=1` y `ST10_AUTO_ENSURE_COMPU_PRODUCT=1` (forzados por el orquestador).
+  - `SOURCE_MASTER`, `CSV_SRC`, `FORCE_CSV=1`, `STAGE_DEBUG=1`.
+- **Salidas:** genera `final/import-report.json` (detalla totales, flags y modo dry-run) y escribe en `wp_compu_offers` / `wp_postmeta` cuando `DRY_RUN=0`.
+- **Logging:** toda la ejecución queda en `$RUN_DIR/logs/10-apply-fast.log` además del consolidado `master.log`.
+- **Verificación automática:** tras el stage, el orquestador ejecuta:
+  - `SELECT COUNT(*) AS offers_rows FROM wp_compu_offers WHERE run_id = "<RUN_ID>";`
+  - `SELECT COUNT(*) AS woo_price_set FROM wp_postmeta WHERE meta_key IN ("_price","_regular_price") AND post_id IN (SELECT post_id FROM wp_compu_products WHERE last_run_id = "<RUN_ID>");`
+  Si cualquiera de los contadores es `0` (en modo no-dry-run), la ejecución aborta.
+- **Dry-run:** con `--dry-run 1` la verificación de tablas se omite y el reporte marca el modo simulado (`dry_run=true`).
+
 ## 8. Cron y automatización
 
 ### 8.1 Cron diario
@@ -213,5 +230,5 @@ tests/smoke_import.sh --mode rows  # subset fijo 1000-1050
 ## 12. Contacto y mantenimiento
 
 - Mantener actualizada la tabla `compu_cats_map` antes de correr Stage 04.
-- Revisar periódicamente los logs de Stage 10 y 11 para detectar banderas (`flags`) y diferencias (`diffs`).
+- Revisar periódicamente `logs/10-apply-fast.log`, `logs/stage11.log` y `logs/11-postcheck.log` para detectar banderas (`flags`) y diferencias (`diffs`).
 - Ante cambios en rutas o comandos, actualizar `scripts/.env` y la documentación correspondiente.
