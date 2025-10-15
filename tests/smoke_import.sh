@@ -149,7 +149,7 @@ else
   exit 1
 fi
 
-for stage_log in stage10 stage11; do
+for stage_log in 10-apply-fast 11-postcheck; do
   log_path="$RUN_DIR/logs/${stage_log}.log"
   if [[ -f "$log_path" ]]; then
     echo "-- tail ${stage_log}.log --"
